@@ -1,0 +1,20 @@
+{
+  "ag1:429769c6fa4c": {
+    "name": "deep-researcher",
+    "version": "1.0.0",
+    "tags": [
+      "research",
+      "web",
+      "citations"
+    ]
+  },
+  "ag1:95b1873a89e1": {
+    "name": "senior-coder",
+    "version": "1.0.0",
+    "tags": [
+      "code",
+      "development",
+      "review"
+    ]
+  }
+}

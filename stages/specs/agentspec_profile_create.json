@@ -1,0 +1,16 @@
+{
+  "name": "agentspec_profile_create",
+  "description": "Create or load an agent profile from an AgentSpec manifest. Profiles accumulate memories, portfolio entries, and skill proofs across sprints.",
+  "input": {"Record": [["manifest", {"Record": [["name", "Text"], ["apiVersion", "Text"]]}]]},
+  "output": {"Record": [["agent_id", "Text"], ["agent_hash", "Text"], ["profile_version", "Text"], ["total_memories", "Number"], ["total_sprints", "Number"]]},
+  "effects": ["FsWrite"],
+  "language": "python",
+  "implementation": "import sys,json;sys.path.insert(0,'/home/alpibru/workspace/agentspec/src');from agentspec.parser.manifest import AgentManifest;from agentspec.profile.manager import ProfileManager;d=json.load(sys.stdin);m=AgentManifest(**d['manifest']);mgr=ProfileManager('/tmp/agentspec-profiles');p=mgr.load_or_create(m);print(json.dumps({'agent_id':p.agent_id,'agent_hash':p.agent_hash,'profile_version':p.profile_version,'total_memories':len(p.memories),'total_sprints':p.total_sprints()}))",
+  "examples": [
+    {
+      "input": {"manifest": {"name": "test-agent", "apiVersion": "agent/v1"}},
+      "output": {"agent_id": "test-agent", "agent_hash": "ag1:xxx", "profile_version": "1.0.0", "total_memories": 0, "total_sprints": 0}
+    }
+  ],
+  "tags": ["agentspec", "profile", "agent", "identity"]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "agentspec_profile_retro",
+  "description": "Process sprint retro findings into agent profile memories and portfolio. Creates signed memories from blockers, learnings, and tool usage. Builds the agent's CV.",
+  "input": {"Record": [["agent_id", "Text"], ["feedback", {"Record": [["assessment", "Text"], ["clarity", "Number"]]}], ["sprint_id", "Text"]]},
+  "output": {"Record": [["memories_added", "Number"], ["memories_signed", "Number"], ["skills_added", "Number"], ["total_memories", "Number"], ["total_skills", "Number"]]},
+  "effects": ["FsRead", "FsWrite"],
+  "language": "python",
+  "implementation": "import sys,json;sys.path.insert(0,'/home/alpibru/workspace/agentspec/src');from agentspec.profile.manager import ProfileManager;d=json.load(sys.stdin);mgr=ProfileManager('/tmp/agentspec-profiles');p=mgr.load_profile(d['agent_id']);r=mgr.process_retro(p,d['feedback'],d['sprint_id'],d.get('project',''));print(json.dumps(r))",
+  "examples": [
+    {
+      "input": {"agent_id": "test-agent", "feedback": {"assessment": "completed", "clarity": 9, "blockers": [], "tools": ["pytest"]}, "sprint_id": "sprint-1"},
+      "output": {"memories_added": 0, "memories_signed": 0, "skills_added": 1, "total_memories": 0, "total_skills": 1}
+    }
+  ],
+  "tags": ["agentspec", "profile", "retro", "portfolio", "signing"]
+}

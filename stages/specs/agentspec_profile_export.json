@@ -1,0 +1,16 @@
+{
+  "name": "agentspec_profile_export",
+  "description": "Export an agent profile with full history: memories, portfolio, skills, signatures. Use for publishing to the registry or sharing with other orchestrators.",
+  "input": {"Record": [["agent_id", "Text"]]},
+  "output": {"Record": [["profile", "Any"], ["summary", {"Record": [["agent_id", "Text"], ["total_sprints", "Number"], ["total_memories", "Number"], ["total_skills", "Number"]]}]]},
+  "effects": ["FsRead"],
+  "language": "python",
+  "implementation": "import sys,json;sys.path.insert(0,'/home/alpibru/workspace/agentspec/src');from agentspec.profile.manager import ProfileManager;d=json.load(sys.stdin);mgr=ProfileManager('/tmp/agentspec-profiles');p=mgr.load_profile(d['agent_id']);print(json.dumps({'profile':p.model_dump(),'summary':{'agent_id':p.agent_id,'agent_hash':p.agent_hash,'total_sprints':p.total_sprints(),'completion_rate':p.completion_rate(),'total_memories':len(p.memories),'validated_memories':len(p.validated_memories()),'total_skills':len(p.skills),'top_skills':[s.skill for s in p.top_skills(5)]}}))",
+  "examples": [
+    {
+      "input": {"agent_id": "test-agent"},
+      "output": {"profile": {}, "summary": {"agent_id": "test-agent", "total_sprints": 0, "total_memories": 0, "total_skills": 0}}
+    }
+  ],
+  "tags": ["agentspec", "profile", "export", "portfolio", "registry"]
+}
