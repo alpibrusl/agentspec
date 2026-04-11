@@ -97,6 +97,9 @@ def _request(
 def push_agent(manifest: AgentManifest, registry_url: str = "") -> dict[str, Any]:
     """Push an .agent manifest to the Noether registry.
 
+    Uses native /v1/agents endpoint (Option B) when available,
+    falls back to /stages wrapping (Option A) for older registries.
+
     Returns: {"hash": "ag1:xxx", "registry_id": "abc...", "name": ..., "version": ...}
     """
     url = registry_url or _registry_url()
@@ -106,8 +109,15 @@ def push_agent(manifest: AgentManifest, registry_url: str = "") -> dict[str, Any
             "or pass --registry URL"
         )
 
-    spec = _manifest_to_stage_spec(manifest)
-    result = _request("POST", f"{url}/stages", spec)
+    # Try native /v1/agents endpoint first (Option B)
+    manifest_dict = manifest.model_dump(exclude_none=True)
+    manifest_dict.pop("_source_dir", None)
+    result = _request("POST", f"{url}/v1/agents", manifest_dict)
+
+    # Fall back to /stages wrapping if /v1/agents not available
+    if result.get("ok") is False and "404" in str(result.get("error", {}).get("code", "")):
+        spec = _manifest_to_stage_spec(manifest)
+        result = _request("POST", f"{url}/stages", spec)
 
     h = agent_hash(manifest)
     if result.get("ok") is not False:
@@ -143,7 +153,17 @@ def pull_agent(ref: str, registry_url: str = "") -> AgentManifest | None:
     if not url:
         raise ValueError("No registry URL configured")
 
-    # Try direct ID lookup first
+    # Try native /v1/agents endpoint first
+    result = _request("GET", f"{url}/v1/agents/{ref}")
+    if result.get("ok") is not False:
+        data = result.get("data", result)
+        manifest = data.get("result", data)
+        try:
+            return AgentManifest(**manifest) if isinstance(manifest, dict) else None
+        except Exception:
+            pass
+
+    # Fall back to /stages wrapping
     result = _request("GET", f"{url}/stages/{ref}")
     if result.get("ok") is not False:
         data = result.get("data", result)
@@ -177,7 +197,14 @@ def search_agents(
     if not url:
         raise ValueError("No registry URL configured")
 
-    # Search with agentspec tag filter
+    # Try native /v1/agents/search endpoint first
+    result = _request("GET", f"{url}/v1/agents/search?q={query}&limit={limit}")
+    if result.get("ok") is not False:
+        data = result.get("data", result)
+        res = data.get("result", data)
+        return res.get("results", []) if isinstance(res, dict) else []
+
+    # Fall back to /stages/search with tag filter
     result = _request("GET", f"{url}/stages/search?q=agent {query}")
     if result.get("ok") is False:
         return []
