@@ -1,0 +1,45 @@
+apiVersion: agent/v1
+name: senior-coder
+version: 1.0.0
+description: "Code review and generation agent"
+tags: [code, development, review]
+
+model:
+  capability: reasoning-high
+  preferred:
+    - claude/claude-sonnet-4-6
+    - openai/o3
+
+skills:
+  - code-execution
+  - file-read
+  - file-write
+
+tools:
+  mcp:
+    - github
+  native:
+    - bash
+
+behavior:
+  traits:
+    - ask-before-writing
+    - never-guess
+    - think-step-by-step
+  temperature: 0.1
+  max_steps: 50
+
+trust:
+  filesystem: scoped
+  scope: [./workspace]
+  network: allowed
+  exec: sandboxed
+
+observability:
+  trace: true
+  cost_limit: 1.00
+  step_limit: 50
+
+extensions:
+  x-claude:
+    extended_thinking: true

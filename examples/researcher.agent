@@ -1,0 +1,46 @@
+apiVersion: agent/v1
+name: deep-researcher
+version: 1.0.0
+description: "Cites everything, never guesses"
+tags: [research, web, citations]
+
+model:
+  capability: reasoning-high
+  preferred:
+    - claude/claude-sonnet-4-6
+    - gemini/gemini-2.5-pro
+    - local/llama3:70b
+  fallback: reasoning-mid
+
+skills:
+  - web-search
+  - cite-sources
+  - summarize
+
+behavior:
+  persona: precise-researcher
+  traits:
+    - cite-everything
+    - flag-uncertainty
+    - never-guess
+  temperature: 0.2
+  max_steps: 15
+  on_error: ask
+
+trust:
+  filesystem: none
+  network: allowed
+  exec: none
+
+observability:
+  trace: true
+  cost_limit: 0.50
+  step_limit: 20
+
+expose:
+  - name: research
+    description: "Deep research on a topic with citations"
+    input:
+      query: str
+      depth: "shallow | deep"
+    output: Report

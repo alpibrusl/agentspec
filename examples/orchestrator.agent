@@ -1,0 +1,29 @@
+apiVersion: agent/v1
+name: research-writer
+version: 1.0.0
+description: "Orchestrates researcher + writer in a pipeline"
+tags: [orchestration, pipeline]
+
+model:
+  capability: reasoning-mid
+  preferred:
+    - claude/claude-sonnet-4-6
+
+agents:
+  researcher:
+    ref: ./researcher.agent
+    role: subagent
+  writer:
+    ref: ./coder.agent
+    role: subagent
+
+pipeline:
+  - call: researcher.research(input.query)
+    output: context
+  - call: writer.write(context)
+    output: final
+
+trust:
+  filesystem: none
+  network: allowed
+  exec: none

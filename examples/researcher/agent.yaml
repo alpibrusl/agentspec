@@ -1,0 +1,23 @@
+apiVersion: agent/v1
+name: deep-researcher
+version: 1.0.0
+
+model:
+  capability: reasoning-high
+  preferred:
+    - claude/claude-sonnet-4-6
+    - gemini/gemini-2.5-pro
+
+skills:
+  - web-search
+  - cite-sources
+  - summarize
+
+trust:
+  filesystem: none
+  network: allowed
+  exec: none
+
+observability:
+  trace: true
+  step_limit: 20

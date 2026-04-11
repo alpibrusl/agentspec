@@ -1,0 +1,400 @@
+{
+  "name": "agentspec",
+  "version": "0.1.0",
+  "acli_version": "0.1.0",
+  "commands": [
+    {
+      "name": "introspect",
+      "description": "Output the full command tree as JSON for agent consumption.",
+      "arguments": [],
+      "options": [
+        {
+          "name": "acli_version",
+          "type": "bool",
+          "description": "Show only the ACLI spec version. type:bool",
+          "default": false
+        },
+        {
+          "name": "output",
+          "type": "OutputFormat",
+          "description": "Output format. type:enum[text|json|table]",
+          "default": "json"
+        }
+      ],
+      "subcommands": []
+    },
+    {
+      "name": "version",
+      "description": "Show version information.",
+      "arguments": [],
+      "options": [
+        {
+          "name": "output",
+          "type": "OutputFormat",
+          "description": "Output format. type:enum[text|json|table]",
+          "default": "text"
+        }
+      ],
+      "subcommands": []
+    },
+    {
+      "name": "skill",
+      "description": "Generate a SKILLS.md file for agent bootstrapping.",
+      "arguments": [],
+      "options": [
+        {
+          "name": "out",
+          "type": "string",
+          "description": "Write skill file to this path instead of stdout. type:path",
+          "default": ""
+        },
+        {
+          "name": "output",
+          "type": "OutputFormat",
+          "description": "Output format. type:enum[text|json|table]",
+          "default": "text"
+        }
+      ],
+      "subcommands": []
+    },
+    {
+      "name": "run",
+      "description": "Resolve and run an agent from a .agent file or directory.",
+      "arguments": [
+        {
+          "name": "agent_path",
+          "type": "string",
+          "required": true,
+          "description": "Path to .agent file or directory. type:path"
+        }
+      ],
+      "options": [
+        {
+          "name": "input_",
+          "type": "string",
+          "description": "Input to pass to the agent. type:string",
+          "default": ""
+        },
+        {
+          "name": "verbose",
+          "type": "bool",
+          "description": "Show resolver decisions. type:bool",
+          "default": false
+        },
+        {
+          "name": "output",
+          "type": "OutputFormat",
+          "description": "Output format. type:enum[text|json|table]",
+          "default": "text"
+        },
+        {
+          "name": "dry_run",
+          "type": "bool",
+          "description": "Resolve without executing. type:bool",
+          "default": false
+        }
+      ],
+      "subcommands": [],
+      "idempotent": false,
+      "examples": [
+        {
+          "description": "Run a researcher agent",
+          "invocation": "agentspec run researcher.agent"
+        },
+        {
+          "description": "Run with input",
+          "invocation": "agentspec run researcher.agent --input 'quantum tunneling'"
+        },
+        {
+          "description": "Dry-run to see the plan",
+          "invocation": "agentspec run researcher.agent --dry-run"
+        },
+        {
+          "description": "Verbose resolver output",
+          "invocation": "agentspec run researcher.agent --verbose"
+        }
+      ],
+      "see_also": [
+        "resolve",
+        "validate"
+      ]
+    },
+    {
+      "name": "validate",
+      "description": "Validate a .agent file or directory against the schema.",
+      "arguments": [
+        {
+          "name": "agent_path",
+          "type": "string",
+          "required": true,
+          "description": "Path to .agent file or directory. type:path"
+        }
+      ],
+      "options": [
+        {
+          "name": "output",
+          "type": "OutputFormat",
+          "description": "Output format. type:enum[text|json|table]",
+          "default": "text"
+        }
+      ],
+      "subcommands": [],
+      "idempotent": true,
+      "examples": [
+        {
+          "description": "Validate a single file",
+          "invocation": "agentspec validate researcher.agent"
+        },
+        {
+          "description": "Validate a directory agent",
+          "invocation": "agentspec validate ./researcher/"
+        },
+        {
+          "description": "JSON output",
+          "invocation": "agentspec validate researcher.agent --output json"
+        }
+      ],
+      "see_also": [
+        "resolve",
+        "schema"
+      ]
+    },
+    {
+      "name": "resolve",
+      "description": "Show what would run without executing. Always verbose.",
+      "arguments": [
+        {
+          "name": "agent_path",
+          "type": "string",
+          "required": true,
+          "description": "Path to .agent file or directory. type:path"
+        }
+      ],
+      "options": [
+        {
+          "name": "output",
+          "type": "OutputFormat",
+          "description": "Output format. type:enum[text|json|table]",
+          "default": "text"
+        }
+      ],
+      "subcommands": [],
+      "idempotent": true,
+      "examples": [
+        {
+          "description": "Show resolver plan",
+          "invocation": "agentspec resolve researcher.agent"
+        },
+        {
+          "description": "JSON output",
+          "invocation": "agentspec resolve researcher.agent --output json"
+        }
+      ],
+      "see_also": [
+        "run",
+        "validate"
+      ]
+    },
+    {
+      "name": "extend",
+      "description": "Scaffold a new agent that extends an existing one.",
+      "arguments": [
+        {
+          "name": "base_path",
+          "type": "string",
+          "required": true,
+          "description": "Base agent to extend. type:path"
+        }
+      ],
+      "options": [
+        {
+          "name": "out",
+          "type": "string",
+          "description": "Output file path. type:path",
+          "default": "extended.agent"
+        },
+        {
+          "name": "output",
+          "type": "OutputFormat",
+          "description": "Output format. type:enum[text|json|table]",
+          "default": "text"
+        },
+        {
+          "name": "dry_run",
+          "type": "string",
+          "description": "Describe actions without executing. type:bool",
+          "default": false
+        }
+      ],
+      "subcommands": [],
+      "idempotent": false,
+      "examples": [
+        {
+          "description": "Extend a researcher",
+          "invocation": "agentspec extend researcher.agent"
+        },
+        {
+          "description": "Custom output file",
+          "invocation": "agentspec extend researcher.agent --out legal-researcher.agent"
+        }
+      ],
+      "see_also": [
+        "validate",
+        "init"
+      ]
+    },
+    {
+      "name": "push",
+      "description": "Publish an agent to the local registry.",
+      "arguments": [
+        {
+          "name": "agent_path",
+          "type": "string",
+          "required": true,
+          "description": "Path to .agent file or directory. type:path"
+        }
+      ],
+      "options": [
+        {
+          "name": "output",
+          "type": "OutputFormat",
+          "description": "Output format. type:enum[text|json|table]",
+          "default": "text"
+        }
+      ],
+      "subcommands": [],
+      "idempotent": true,
+      "examples": [
+        {
+          "description": "Push an agent",
+          "invocation": "agentspec push researcher.agent"
+        },
+        {
+          "description": "JSON output",
+          "invocation": "agentspec push researcher.agent --output json"
+        }
+      ],
+      "see_also": [
+        "pull",
+        "validate"
+      ]
+    },
+    {
+      "name": "pull",
+      "description": "Pull an agent from the local registry.",
+      "arguments": [
+        {
+          "name": "ref",
+          "type": "string",
+          "required": true,
+          "description": "Agent reference: ag1:<hash> or name@version. type:string"
+        }
+      ],
+      "options": [
+        {
+          "name": "output",
+          "type": "OutputFormat",
+          "description": "Output format. type:enum[text|json|table]",
+          "default": "text"
+        }
+      ],
+      "subcommands": [],
+      "idempotent": true,
+      "examples": [
+        {
+          "description": "Pull by hash",
+          "invocation": "agentspec pull ag1:abc123def456"
+        },
+        {
+          "description": "JSON output",
+          "invocation": "agentspec pull ag1:abc123def456 --output json"
+        }
+      ],
+      "see_also": [
+        "push"
+      ]
+    },
+    {
+      "name": "schema",
+      "description": "Print the JSON Schema for .agent files.",
+      "arguments": [],
+      "options": [
+        {
+          "name": "out",
+          "type": "string",
+          "description": "Write schema to file. type:path",
+          "default": ""
+        },
+        {
+          "name": "output",
+          "type": "OutputFormat",
+          "description": "Output format. type:enum[text|json|table]",
+          "default": "text"
+        }
+      ],
+      "subcommands": [],
+      "idempotent": true,
+      "examples": [
+        {
+          "description": "Print JSON Schema",
+          "invocation": "agentspec schema"
+        },
+        {
+          "description": "Save to file",
+          "invocation": "agentspec schema --out agent-v1.json"
+        }
+      ],
+      "see_also": [
+        "validate"
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Scaffold a new .agent project.",
+      "arguments": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Agent name. type:string"
+        }
+      ],
+      "options": [
+        {
+          "name": "format_",
+          "type": "string",
+          "description": "Format: file or directory. type:enum[file|directory]",
+          "default": "file"
+        },
+        {
+          "name": "output",
+          "type": "OutputFormat",
+          "description": "Output format. type:enum[text|json|table]",
+          "default": "text"
+        },
+        {
+          "name": "dry_run",
+          "type": "string",
+          "description": "Describe actions without executing. type:bool",
+          "default": false
+        }
+      ],
+      "subcommands": [],
+      "idempotent": false,
+      "examples": [
+        {
+          "description": "Create a new agent",
+          "invocation": "agentspec init my-agent"
+        },
+        {
+          "description": "Create directory format",
+          "invocation": "agentspec init my-agent --format directory"
+        }
+      ],
+      "see_also": [
+        "extend",
+        "validate"
+      ]
+    }
+  ]
+}

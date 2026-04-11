@@ -1,0 +1,639 @@
+{
+  "$defs": {
+    "AuthProvider": {
+      "properties": {
+        "from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From"
+        }
+      },
+      "title": "AuthProvider",
+      "type": "object"
+    },
+    "AuthSpec": {
+      "properties": {
+        "strategy": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "explicit",
+            "none"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        },
+        "providers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/AuthProvider"
+          },
+          "default": {},
+          "title": "Providers",
+          "type": "object"
+        }
+      },
+      "title": "AuthSpec",
+      "type": "object"
+    },
+    "BehaviorSpec": {
+      "properties": {
+        "persona": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Persona"
+        },
+        "traits": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Traits",
+          "type": "array"
+        },
+        "temperature": {
+          "default": 0.5,
+          "title": "Temperature",
+          "type": "number"
+        },
+        "max_steps": {
+          "default": 20,
+          "title": "Max Steps",
+          "type": "integer"
+        },
+        "on_error": {
+          "default": "ask",
+          "enum": [
+            "ask",
+            "retry",
+            "fail",
+            "skip"
+          ],
+          "title": "On Error",
+          "type": "string"
+        },
+        "system_override": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "System Override"
+        }
+      },
+      "title": "BehaviorSpec",
+      "type": "object"
+    },
+    "ExposedMethod": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "input": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Input",
+          "type": "object"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ExposedMethod",
+      "type": "object"
+    },
+    "MemorySpec": {
+      "properties": {
+        "working": {
+          "default": "session",
+          "enum": [
+            "session",
+            "none"
+          ],
+          "title": "Working",
+          "type": "string"
+        },
+        "long_term": {
+          "default": "none",
+          "enum": [
+            "none",
+            "local",
+            "external"
+          ],
+          "title": "Long Term",
+          "type": "string"
+        },
+        "shared": {
+          "default": false,
+          "title": "Shared",
+          "type": "boolean"
+        }
+      },
+      "title": "MemorySpec",
+      "type": "object"
+    },
+    "MergeSpec": {
+      "properties": {
+        "skills": {
+          "default": "append",
+          "enum": [
+            "append",
+            "override",
+            "restrict"
+          ],
+          "title": "Skills",
+          "type": "string"
+        },
+        "tools": {
+          "default": "append",
+          "enum": [
+            "append",
+            "override",
+            "restrict"
+          ],
+          "title": "Tools",
+          "type": "string"
+        },
+        "behavior": {
+          "default": "override",
+          "enum": [
+            "override",
+            "append"
+          ],
+          "title": "Behavior",
+          "type": "string"
+        },
+        "trust": {
+          "const": "restrict",
+          "default": "restrict",
+          "title": "Trust",
+          "type": "string"
+        }
+      },
+      "title": "MergeSpec",
+      "type": "object"
+    },
+    "ModelSpec": {
+      "properties": {
+        "capability": {
+          "default": "reasoning-mid",
+          "enum": [
+            "reasoning-low",
+            "reasoning-mid",
+            "reasoning-high",
+            "reasoning-max"
+          ],
+          "title": "Capability",
+          "type": "string"
+        },
+        "preferred": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Preferred",
+          "type": "array"
+        },
+        "fallback": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback"
+        },
+        "context": {
+          "anyOf": [
+            {
+              "const": "full",
+              "type": "string"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": "full",
+          "title": "Context"
+        }
+      },
+      "title": "ModelSpec",
+      "type": "object"
+    },
+    "ObservabilitySpec": {
+      "properties": {
+        "trace": {
+          "default": false,
+          "title": "Trace",
+          "type": "boolean"
+        },
+        "cost_limit": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cost Limit"
+        },
+        "step_limit": {
+          "default": 50,
+          "title": "Step Limit",
+          "type": "integer"
+        },
+        "on_exceed": {
+          "default": "abort",
+          "enum": [
+            "ask",
+            "abort"
+          ],
+          "title": "On Exceed",
+          "type": "string"
+        }
+      },
+      "title": "ObservabilitySpec",
+      "type": "object"
+    },
+    "PipelineStep": {
+      "properties": {
+        "call": {
+          "title": "Call",
+          "type": "string"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output"
+        }
+      },
+      "required": [
+        "call"
+      ],
+      "title": "PipelineStep",
+      "type": "object"
+    },
+    "SubAgentRef": {
+      "properties": {
+        "ref": {
+          "title": "Ref",
+          "type": "string"
+        },
+        "role": {
+          "default": "subagent",
+          "enum": [
+            "subagent",
+            "orchestrator",
+            "validator"
+          ],
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "title": "SubAgentRef",
+      "type": "object"
+    },
+    "ToolsSpec": {
+      "properties": {
+        "mcp": {
+          "default": [],
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Mcp",
+          "type": "array"
+        },
+        "native": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Native",
+          "type": "array"
+        }
+      },
+      "title": "ToolsSpec",
+      "type": "object"
+    },
+    "TrustSpec": {
+      "properties": {
+        "filesystem": {
+          "default": "none",
+          "enum": [
+            "none",
+            "read-only",
+            "scoped",
+            "full"
+          ],
+          "title": "Filesystem",
+          "type": "string"
+        },
+        "network": {
+          "default": "none",
+          "enum": [
+            "none",
+            "allowed",
+            "scoped"
+          ],
+          "title": "Network",
+          "type": "string"
+        },
+        "exec": {
+          "default": "none",
+          "enum": [
+            "none",
+            "sandboxed",
+            "full"
+          ],
+          "title": "Exec",
+          "type": "string"
+        },
+        "scope": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Scope",
+          "type": "array"
+        }
+      },
+      "title": "TrustSpec",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "apiVersion": {
+      "default": "agent/v1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "version": {
+      "default": "0.1.0",
+      "title": "Version",
+      "type": "string"
+    },
+    "author": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Author"
+    },
+    "license": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "License"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "tags": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "base": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Base"
+    },
+    "merge": {
+      "$ref": "#/$defs/MergeSpec",
+      "default": {
+        "skills": "append",
+        "tools": "append",
+        "behavior": "override",
+        "trust": "restrict"
+      }
+    },
+    "model": {
+      "$ref": "#/$defs/ModelSpec",
+      "default": {
+        "capability": "reasoning-mid",
+        "preferred": [],
+        "fallback": null,
+        "context": "full"
+      }
+    },
+    "auth": {
+      "$ref": "#/$defs/AuthSpec",
+      "default": {
+        "strategy": "auto",
+        "providers": {}
+      }
+    },
+    "skills": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Skills",
+      "type": "array"
+    },
+    "tools": {
+      "$ref": "#/$defs/ToolsSpec",
+      "default": {
+        "mcp": [],
+        "native": []
+      }
+    },
+    "memory": {
+      "$ref": "#/$defs/MemorySpec",
+      "default": {
+        "working": "session",
+        "long_term": "none",
+        "shared": false
+      }
+    },
+    "behavior": {
+      "$ref": "#/$defs/BehaviorSpec",
+      "default": {
+        "persona": null,
+        "traits": [],
+        "temperature": 0.5,
+        "max_steps": 20,
+        "on_error": "ask",
+        "system_override": null
+      }
+    },
+    "expose": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ExposedMethod"
+      },
+      "title": "Expose",
+      "type": "array"
+    },
+    "trust": {
+      "$ref": "#/$defs/TrustSpec",
+      "default": {
+        "filesystem": "none",
+        "network": "none",
+        "exec": "none",
+        "scope": []
+      }
+    },
+    "observability": {
+      "$ref": "#/$defs/ObservabilitySpec",
+      "default": {
+        "trace": false,
+        "cost_limit": null,
+        "step_limit": 50,
+        "on_exceed": "abort"
+      }
+    },
+    "agents": {
+      "additionalProperties": {
+        "$ref": "#/$defs/SubAgentRef"
+      },
+      "default": {},
+      "title": "Agents",
+      "type": "object"
+    },
+    "pipeline": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PipelineStep"
+      },
+      "title": "Pipeline",
+      "type": "array"
+    },
+    "extensions": {
+      "additionalProperties": true,
+      "default": {},
+      "title": "Extensions",
+      "type": "object"
+    },
+    "soul": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Soul"
+    },
+    "rules": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rules"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "AgentManifest",
+  "type": "object"
+}
