@@ -52,7 +52,12 @@ class ProfileManager:
             pubkey_file.write_text(self.public_key)
 
     def create_profile(self, manifest: AgentManifest) -> AgentProfile:
-        """Create a new agent profile from an AgentSpec manifest."""
+        """Create a new agent profile from an AgentSpec manifest.
+
+        Cold start: seeds the profile with baseline skills and a bootstrap
+        memory derived from the manifest. This ensures the HR Agent has
+        context even on the very first sprint.
+        """
         h = agent_hash(manifest)
         profile = AgentProfile(
             agent_id=manifest.name,
@@ -60,6 +65,59 @@ class ProfileManager:
             manifest_version=manifest.version,
             supervisor_pubkey=self.public_key,
         )
+
+        # ── Cold start: seed from manifest ─────────────────────────
+        # Add declared skills as baseline proofs (low confidence — not yet demonstrated)
+        for skill in manifest.skills:
+            profile.add_skill_proof(SkillProof(
+                skill=skill,
+                level="declared",
+                evidence_type="manifest",
+                evidence=f"Declared in .agent manifest v{manifest.version}",
+                confidence=0.3,  # low — not yet demonstrated in a real sprint
+            ))
+
+        # Add a bootstrap memory with the agent's persona and traits
+        traits = manifest.behavior.traits
+        persona = manifest.behavior.persona
+        if persona or traits:
+            desc_parts = []
+            if persona:
+                desc_parts.append(f"Persona: {persona}")
+            if traits:
+                desc_parts.append(f"Traits: {', '.join(traits)}")
+            if manifest.model.capability:
+                desc_parts.append(f"Capability: {manifest.model.capability}")
+
+            bootstrap = Memory(
+                content=f"Agent initialized from manifest. {'. '.join(desc_parts)}.",
+                category=MemoryCategory.EVOLUTION.value,
+                confidence=1.0,
+                status=MemoryStatus.VALIDATED,
+                source=MemorySource(
+                    type="system",
+                    agent_id=manifest.name,
+                    evidence=f"AgentSpec manifest {h}",
+                ),
+            )
+            profile.add_memory(bootstrap)
+            envelope = sign_memory(bootstrap, self.private_key)
+            profile.signatures.append(envelope)
+
+        # Add a bootstrap memory with model preference for HR context
+        if manifest.model.preferred:
+            model_mem = Memory(
+                content=f"Preferred models: {', '.join(manifest.model.preferred[:3])}. "
+                        f"Fallback: {manifest.model.fallback or 'none'}.",
+                category=MemoryCategory.TOOL_KNOWLEDGE.value,
+                confidence=1.0,
+                status=MemoryStatus.VALIDATED,
+                source=MemorySource(type="system", agent_id=manifest.name),
+            )
+            profile.add_memory(model_mem)
+            envelope = sign_memory(model_mem, self.private_key)
+            profile.signatures.append(envelope)
+
         self._save(profile)
         return profile
 
