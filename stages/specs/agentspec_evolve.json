@@ -1,0 +1,20 @@
+{
+  "name": "agentspec_evolve",
+  "description": "Evolve an agent manifest based on sprint retrospective data. Applies rules: high failure → stronger model, low clarity → add traits, many interventions → adjust parameters.",
+  "input": {"Record": [["manifest", {"Record": [["name", "Text"], ["apiVersion", "Text"]]}], ["retro", {"Record": [["avg_clarity", "Number"], ["failure_rate", "Number"], ["supervisor_events", "Number"], ["avg_review_cycles", "Number"]]}], ["sprint_id", "Text"]]},
+  "output": {"Record": [["evolved", "Any"], ["evolved_version", "Any"], ["evolved_hash", "Any"], ["changes", {"List": "Any"}]]},
+  "effects": ["Fallible"],
+  "language": "python",
+  "implementation": "import sys,json;sys.path.insert(0,'/home/alpibru/workspace/agentspec/src');sys.path.insert(0,'/home/alpibru/workspace/caloron-noether/orchestrator');from agentspec.parser.manifest import AgentManifest;from agentspec.parser.loader import agent_hash;from agentspec_bridge import evolve_agent_manifest;d=json.load(sys.stdin);m=AgentManifest(**d['manifest']);e,c=evolve_agent_manifest(m,d['retro'],{},d['sprint_id']);r={'evolved':e.model_dump(exclude_none=True) if e else None,'evolved_version':e.version if e else None,'evolved_hash':agent_hash(e) if e else None,'changes':[{'field':x.field,'new_value':x.new_value,'reason':x.reason} for x in c]};print(json.dumps(r))",
+  "examples": [
+    {
+      "input": {
+        "manifest": {"name": "test", "apiVersion": "agent/v1", "model": {"capability": "reasoning-mid"}},
+        "retro": {"avg_clarity": 3.0, "failure_rate": 0.5, "supervisor_events": 2, "avg_review_cycles": 3.0},
+        "sprint_id": "sprint-1"
+      },
+      "output": {"evolved": {"name": "test"}, "evolved_version": "1.1.0", "evolved_hash": "ag1:xxx", "changes": []}
+    }
+  ],
+  "tags": ["agentspec", "evolution", "retro", "adaptation", "agent"]
+}

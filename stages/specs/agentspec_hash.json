@@ -1,0 +1,16 @@
+{
+  "name": "agentspec_hash",
+  "description": "Compute content-addressable hash (ag1:xxx) of an agent manifest. Deterministic — same manifest always produces the same hash.",
+  "input": {"Record": [["manifest", {"Record": [["name", "Text"], ["apiVersion", "Text"]]}]]},
+  "output": {"Record": [["hash", "Text"], ["name", "Text"], ["version", "Text"]]},
+  "effects": [],
+  "language": "python",
+  "implementation": "import sys,json;sys.path.insert(0,'/home/alpibru/workspace/agentspec/src');from agentspec.parser.manifest import AgentManifest;from agentspec.parser.loader import agent_hash;d=json.load(sys.stdin);m=AgentManifest(**d['manifest']);print(json.dumps({'hash':agent_hash(m),'name':m.name,'version':m.version}))",
+  "examples": [
+    {
+      "input": {"manifest": {"name": "test", "apiVersion": "agent/v1", "version": "1.0.0"}},
+      "output": {"hash": "ag1:placeholder", "name": "test", "version": "1.0.0"}
+    }
+  ],
+  "tags": ["agentspec", "hash", "content-addressable", "agent"]
+}

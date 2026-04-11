@@ -1,0 +1,16 @@
+{
+  "name": "agentspec_validate",
+  "description": "Validate an agent manifest against the AgentSpec schema. Returns validity, name, version, content hash, and any errors.",
+  "input": {"Record": [["manifest", {"Record": [["name", "Text"], ["apiVersion", "Text"]]}]]},
+  "output": {"Record": [["valid", "Bool"], ["name", "Text"], ["version", "Text"], ["hash", "Text"], ["errors", {"List": "Text"}]]},
+  "effects": ["Fallible"],
+  "language": "python",
+  "implementation": "import sys,json;sys.path.insert(0,'/home/alpibru/workspace/agentspec/src');from agentspec.parser.manifest import AgentManifest;from agentspec.parser.loader import agent_hash;d=json.load(sys.stdin);m=AgentManifest(**d['manifest']);h=agent_hash(m);print(json.dumps({'valid':True,'name':m.name,'version':m.version,'hash':h,'errors':[]}))",
+  "examples": [
+    {
+      "input": {"manifest": {"name": "test-agent", "apiVersion": "agent/v1", "version": "1.0.0"}},
+      "output": {"valid": true, "name": "test-agent", "version": "1.0.0", "hash": "ag1:placeholder", "errors": []}
+    }
+  ],
+  "tags": ["agentspec", "validation", "schema", "agent"]
+}

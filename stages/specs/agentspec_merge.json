@@ -1,0 +1,19 @@
+{
+  "name": "agentspec_merge",
+  "description": "Merge a child agent manifest with its parent using declared merge strategies. Enforces trust-restrict invariant: child cannot escalate parent permissions.",
+  "input": {"Record": [["child", {"Record": [["name", "Text"], ["apiVersion", "Text"]]}], ["parent", {"Record": [["name", "Text"], ["apiVersion", "Text"]]}]]},
+  "output": {"Record": [["merged", {"Record": [["name", "Text"]]}], ["trust_ok", "Bool"]]},
+  "effects": ["Fallible"],
+  "language": "python",
+  "implementation": "import sys,json;sys.path.insert(0,'/home/alpibru/workspace/agentspec/src');from agentspec.parser.manifest import AgentManifest;from agentspec.resolver.merger import _merge,_assert_trust_restriction,TrustEscalationError;d=json.load(sys.stdin);c=AgentManifest(**d['child']);p=AgentManifest(**d['parent']);m=_merge(p,c,c.merge);_assert_trust_restriction(c.trust,p.trust);print(json.dumps({'merged':m.model_dump(exclude_none=True),'trust_ok':True}))",
+  "examples": [
+    {
+      "input": {
+        "child": {"name": "child", "apiVersion": "agent/v1", "skills": ["web-search"]},
+        "parent": {"name": "parent", "apiVersion": "agent/v1", "skills": ["code-execution"]}
+      },
+      "output": {"merged": {"name": "child"}, "trust_ok": true}
+    }
+  ],
+  "tags": ["agentspec", "merge", "inheritance", "trust", "agent"]
+}

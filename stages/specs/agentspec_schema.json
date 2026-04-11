@@ -1,0 +1,16 @@
+{
+  "name": "agentspec_schema",
+  "description": "Export the AgentSpec JSON Schema, auto-generated from Pydantic models. Use to validate .agent files externally.",
+  "input": {"Record": []},
+  "output": {"Record": [["schema", "Any"]]},
+  "effects": [],
+  "language": "python",
+  "implementation": "import sys,json;sys.path.insert(0,'/home/alpibru/workspace/agentspec/src');from agentspec.parser.loader import export_schema;print(json.dumps({'schema':export_schema()}))",
+  "examples": [
+    {
+      "input": {},
+      "output": {"schema": {"properties": {"name": {}}}}
+    }
+  ],
+  "tags": ["agentspec", "schema", "jsonschema", "agent"]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "agentspec_resolve",
+  "description": "Resolve an agent manifest against the current environment. Detects available runtimes, matches model preferences, maps skills to tools, builds system prompt.",
+  "input": {"Record": [["manifest", {"Record": [["name", "Text"], ["apiVersion", "Text"]]}]]},
+  "output": {"Record": [["runtime", "Text"], ["model", "Text"], ["tools", {"List": "Text"}], ["missing_tools", {"List": "Text"}], ["auth_source", "Text"], ["warnings", {"List": "Text"}], ["decisions", {"List": "Text"}]]},
+  "effects": ["Fallible", "EnvRead"],
+  "language": "python",
+  "implementation": "import sys,json;sys.path.insert(0,'/home/alpibru/workspace/agentspec/src');from agentspec.parser.manifest import AgentManifest;from agentspec.resolver.resolver import resolve;d=json.load(sys.stdin);m=AgentManifest(**d['manifest']);p=resolve(m,verbose=True);print(json.dumps(p.to_dict()))",
+  "examples": [
+    {
+      "input": {"manifest": {"name": "test", "apiVersion": "agent/v1", "model": {"preferred": ["local/llama3:8b"], "capability": "reasoning-low"}}},
+      "output": {"runtime": "ollama", "model": "local/llama3:8b", "tools": [], "missing_tools": [], "auth_source": "local socket", "warnings": [], "decisions": []}
+    }
+  ],
+  "tags": ["agentspec", "resolver", "runtime", "environment", "agent"]
+}
