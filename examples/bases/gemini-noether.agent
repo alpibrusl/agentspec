@@ -1,0 +1,31 @@
+apiVersion: agent/v1
+name: base-gemini-noether
+version: 1.0.0
+description: "Gemini agent with Noether verified composition skills"
+tags: [base, gemini, noether, composition]
+
+base: ./gemini.agent
+
+merge:
+  skills: append
+  tools: append
+  behavior: append
+  trust: restrict
+
+skills:
+  - noether-compose
+  - noether-run
+  - noether-search
+  - noether-serve
+
+behavior:
+  traits:
+    - noether-first
+    - noether-verify
+  temperature: 0.1
+
+trust:
+  filesystem: scoped
+  scope: [./src, ./tests, ./docs, ./compositions, ./stages]
+  network: allowed
+  exec: sandboxed

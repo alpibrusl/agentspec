@@ -1,0 +1,30 @@
+apiVersion: agent/v1
+name: base-local-noether
+version: 1.0.0
+description: "Local Ollama agent with Noether verified composition skills"
+tags: [base, local, ollama, noether, composition]
+
+base: ./local.agent
+
+merge:
+  skills: append
+  tools: append
+  behavior: append
+  trust: restrict
+
+skills:
+  - noether-compose
+  - noether-run
+  - noether-search
+
+behavior:
+  traits:
+    - noether-first
+    - noether-verify
+  temperature: 0.2
+
+trust:
+  filesystem: scoped
+  scope: [./src, ./tests, ./compositions, ./stages]
+  network: none
+  exec: sandboxed

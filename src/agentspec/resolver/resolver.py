@@ -229,6 +229,10 @@ SKILL_MAP: dict[str, list[str]] = {
     "browser": ["playwright-mcp", "puppeteer-mcp"],
     "git": ["git"],
     "github": ["github-mcp"],
+    "noether-compose": ["noether"],
+    "noether-run": ["noether"],
+    "noether-search": ["noether"],
+    "noether-serve": ["noether"],
 }
 
 
@@ -287,6 +291,17 @@ TRAIT_PROMPTS: dict[str, str] = {
     "be-concise": "Be brief and direct. Avoid padding.",
     "self-review": "Review your own output for errors before presenting it.",
     "test-first": "Write tests before implementation code.",
+    "noether-first": (
+        "Prefer Noether compositions over writing code from scratch. "
+        "Use `noether decompose` to break problems into verified stages, "
+        "`noether search` to find reusable stages in the library, "
+        "and `noether run` to execute compositions. "
+        "Noether stages are content-addressed and type-safe — reuse over reinvention."
+    ),
+    "noether-verify": (
+        "Always run `noether lint` on .nth files before executing them. "
+        "Use `noether compile --verify` to type-check stage graphs."
+    ),
 }
 
 

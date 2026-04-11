@@ -1,0 +1,39 @@
+apiVersion: agent/v1
+name: data-analyst
+version: 1.0.0
+description: "Data analysis agent — explores, transforms, and visualizes data"
+tags: [data, analytics, python, pandas]
+
+model:
+  capability: reasoning-mid
+  preferred:
+    - claude/claude-sonnet-4-6
+    - gemini/gemini-2.5-pro
+    - local/llama3:70b
+  fallback: reasoning-low
+
+skills:
+  - code-execution
+  - data-analysis
+  - file-read
+  - file-write
+
+behavior:
+  persona: data-analyst
+  traits:
+    - think-step-by-step
+    - cite-everything
+    - be-concise
+  temperature: 0.2
+  max_steps: 30
+  on_error: ask
+
+trust:
+  filesystem: scoped
+  scope: [./data, ./output, ./src]
+  network: allowed
+  exec: sandboxed
+
+observability:
+  trace: true
+  step_limit: 40

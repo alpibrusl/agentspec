@@ -1,0 +1,50 @@
+apiVersion: agent/v1
+name: base-claude
+version: 1.0.0
+description: "Base Claude Code agent — general-purpose development"
+tags: [base, claude, development]
+
+model:
+  capability: reasoning-high
+  preferred:
+    - claude/claude-sonnet-4-6
+    - claude/claude-haiku-4-5
+  fallback: reasoning-mid
+
+skills:
+  - code-execution
+  - file-read
+  - file-write
+  - git
+  - github
+
+tools:
+  mcp:
+    - github
+  native:
+    - bash
+    - browser
+
+behavior:
+  persona: senior-developer
+  traits:
+    - think-step-by-step
+    - be-concise
+    - self-review
+  temperature: 0.2
+  max_steps: 50
+  on_error: retry
+
+trust:
+  filesystem: scoped
+  scope: [./src, ./tests, ./docs]
+  network: allowed
+  exec: sandboxed
+
+observability:
+  trace: true
+  step_limit: 50
+
+extensions:
+  x-claude:
+    extended_thinking: true

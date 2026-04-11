@@ -1,0 +1,40 @@
+apiVersion: agent/v1
+name: base-local
+version: 1.0.0
+description: "Base local agent — runs on Ollama, no API keys needed"
+tags: [base, local, ollama]
+
+model:
+  capability: reasoning-mid
+  preferred:
+    - local/llama3:70b
+    - local/llama3:8b
+    - local/mistral:7b
+
+skills:
+  - code-execution
+  - file-read
+  - file-write
+
+tools:
+  native:
+    - bash
+
+behavior:
+  persona: developer
+  traits:
+    - think-step-by-step
+    - be-concise
+  temperature: 0.3
+  max_steps: 30
+  on_error: retry
+
+trust:
+  filesystem: scoped
+  scope: [./src, ./tests]
+  network: none
+  exec: sandboxed
+
+observability:
+  trace: true
+  step_limit: 30
