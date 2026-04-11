@@ -17,6 +17,7 @@ Commands:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -295,19 +296,24 @@ merge:
 @app.command()
 @acli_command(
     examples=[
-        ("Push an agent", "agentspec push researcher.agent"),
+        ("Push to local registry", "agentspec push researcher.agent"),
+        ("Push to remote registry", "agentspec push researcher.agent --registry http://localhost:3000"),
         ("JSON output", "agentspec push researcher.agent --output json"),
     ],
     idempotent=True,
-    see_also=["pull", "validate"],
+    see_also=["pull", "search", "validate"],
 )
 def push(
     agent_path: str = typer.Argument(help="Path to .agent file or directory. type:path"),
+    registry: str = typer.Option(
+        "", "--registry", "-r",
+        help="Remote registry URL (e.g. http://localhost:3000). Also reads AGENTSPEC_REGISTRY / NOETHER_REGISTRY env. type:string",
+    ),
     output: OutputFormat = typer.Option(
         OutputFormat.text, "--output", help="Output format. type:enum[text|json|table]"
     ),
 ) -> None:
-    """Publish an agent to the local registry."""
+    """Publish an agent to a registry (local or remote Noether registry)."""
     start = time.time()
 
     path = Path(agent_path)
@@ -317,29 +323,46 @@ def push(
     manifest = load_agent(path)
     h = agent_hash(manifest)
 
-    # Write to local registry
-    registry_dir = Path("registry/agents")
-    registry_dir.mkdir(parents=True, exist_ok=True)
-    agent_file = registry_dir / f"{h.replace(':', '_')}.json"
-    agent_file.write_text(manifest.model_dump_json(indent=2))
+    # Determine registry: CLI flag > env var > local fallback
+    registry_url = registry or os.environ.get("AGENTSPEC_REGISTRY") or os.environ.get("NOETHER_REGISTRY", "")
 
-    # Update index
-    index_path = Path("registry/index.json")
-    index: dict[str, object] = {}
-    if index_path.exists():
-        index = json.loads(index_path.read_text())
-    index[h] = {
-        "name": manifest.name,
-        "version": manifest.version,
-        "tags": manifest.tags,
-    }
-    index_path.write_text(json.dumps(index, indent=2))
+    if registry_url:
+        # Remote push via Noether registry
+        from agentspec.registry.client import push_agent
+        result = push_agent(manifest, registry_url)
+        if "error" in result:
+            raise PreconditionError(
+                f"Registry push failed: {result['error']}",
+                hint=f"Check registry is running at {registry_url}",
+            )
+        data = {
+            "hash": result["hash"],
+            "registry_id": result.get("registry_id", ""),
+            "registry": registry_url,
+            "name": manifest.name,
+            "version": manifest.version,
+        }
+    else:
+        # Local push (filesystem)
+        registry_dir = Path("registry/agents")
+        registry_dir.mkdir(parents=True, exist_ok=True)
+        agent_file = registry_dir / f"{h.replace(':', '_')}.json"
+        agent_file.write_text(manifest.model_dump_json(indent=2))
 
-    data = {"hash": h, "name": manifest.name, "version": manifest.version}
+        index_path = Path("registry/index.json")
+        index: dict[str, object] = {}
+        if index_path.exists():
+            index = json.loads(index_path.read_text())
+        index[h] = {"name": manifest.name, "version": manifest.version, "tags": manifest.tags}
+        index_path.write_text(json.dumps(index, indent=2))
+
+        data = {"hash": h, "name": manifest.name, "version": manifest.version, "registry": "local"}
+
     if output == OutputFormat.json:
         emit(success_envelope("push", data, version="0.1.0", start_time=start), output)
     else:
-        sys.stdout.write(f"Pushed: {manifest.name}@{manifest.version} -> {h}\n")
+        dest = registry_url or "local"
+        sys.stdout.write(f"Pushed: {manifest.name}@{manifest.version} -> {h} ({dest})\n")
 
 
 # ── pull ──────────────────────────────────────────────────────────────────────
@@ -348,34 +371,52 @@ def push(
 @app.command()
 @acli_command(
     examples=[
-        ("Pull by hash", "agentspec pull ag1:abc123def456"),
-        ("JSON output", "agentspec pull ag1:abc123def456 --output json"),
+        ("Pull from local registry", "agentspec pull ag1:abc123def456"),
+        ("Pull from remote registry", "agentspec pull abc123def456 --registry http://localhost:3000"),
+        ("JSON output", "agentspec pull ag1:abc123 --output json"),
     ],
     idempotent=True,
-    see_also=["push"],
+    see_also=["push", "search"],
 )
 def pull(
-    ref: str = typer.Argument(help="Agent reference: ag1:<hash> or name@version. type:string"),
+    ref: str = typer.Argument(help="Agent reference: registry stage ID or ag1:<hash>. type:string"),
+    registry: str = typer.Option(
+        "", "--registry", "-r",
+        help="Remote registry URL. Also reads AGENTSPEC_REGISTRY / NOETHER_REGISTRY env. type:string",
+    ),
     output: OutputFormat = typer.Option(
         OutputFormat.text, "--output", help="Output format. type:enum[text|json|table]"
     ),
 ) -> None:
-    """Pull an agent from the local registry."""
+    """Pull an agent from a registry (local or remote Noether registry)."""
     start = time.time()
 
-    registry_file = Path("registry/agents") / f"{ref.replace(':', '_')}.json"
-    if not registry_file.exists():
-        raise NotFoundError(
-            f"Agent not found in registry: {ref}",
-            hint="Try: agentspec push <agent> first, or check registry/index.json",
-        )
+    registry_url = registry or os.environ.get("AGENTSPEC_REGISTRY") or os.environ.get("NOETHER_REGISTRY", "")
 
-    manifest = AgentManifest.model_validate_json(registry_file.read_text())
+    if registry_url:
+        # Remote pull via Noether registry
+        from agentspec.registry.client import pull_agent
+        manifest = pull_agent(ref, registry_url)
+        if not manifest:
+            raise NotFoundError(
+                f"Agent not found in registry: {ref}",
+                hint=f"Try: agentspec search <query> --registry {registry_url}",
+            )
+    else:
+        # Local pull (filesystem)
+        registry_file = Path("registry/agents") / f"{ref.replace(':', '_')}.json"
+        if not registry_file.exists():
+            raise NotFoundError(
+                f"Agent not found in local registry: {ref}",
+                hint="Try: agentspec push <agent> first, or use --registry for remote",
+            )
+        manifest = AgentManifest.model_validate_json(registry_file.read_text())
+
     out_file = f"{manifest.name}.agent"
 
-    # Export as YAML
     import yaml
     data_dict = manifest.model_dump(exclude_none=True, exclude_defaults=True)
+    data_dict.pop("_source_dir", None)
     Path(out_file).write_text(yaml.dump(data_dict, default_flow_style=False, sort_keys=False))
 
     data = {"name": manifest.name, "version": manifest.version, "output": out_file}
@@ -383,6 +424,55 @@ def pull(
         emit(success_envelope("pull", data, version="0.1.0", start_time=start), output)
     else:
         sys.stdout.write(f"Pulled: {manifest.name}@{manifest.version} -> {out_file}\n")
+
+
+# ── search ────────────────────────────────────────────────────────────────────
+
+
+@app.command()
+@acli_command(
+    examples=[
+        ("Search for researcher agents", "agentspec search researcher --registry http://localhost:3000"),
+        ("JSON output", "agentspec search coder --registry http://localhost:3000 --output json"),
+    ],
+    idempotent=True,
+    see_also=["push", "pull"],
+)
+def search(
+    query: str = typer.Argument(help="Search query. type:string"),
+    registry: str = typer.Option(
+        "", "--registry", "-r",
+        help="Registry URL. Also reads AGENTSPEC_REGISTRY / NOETHER_REGISTRY env. type:string",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.text, "--output", help="Output format. type:enum[text|json|table]"
+    ),
+) -> None:
+    """Search for agents in a remote Noether registry."""
+    start = time.time()
+
+    registry_url = registry or os.environ.get("AGENTSPEC_REGISTRY") or os.environ.get("NOETHER_REGISTRY", "")
+    if not registry_url:
+        raise PreconditionError(
+            "No registry URL configured",
+            hint="Set AGENTSPEC_REGISTRY or NOETHER_REGISTRY env var, or pass --registry URL",
+        )
+
+    from agentspec.registry.client import search_agents
+    results = search_agents(query, registry_url)
+
+    data = {"query": query, "count": len(results), "agents": results}
+    if output == OutputFormat.json:
+        emit(success_envelope("search", data, version="0.1.0", start_time=start), output)
+    else:
+        if not results:
+            sys.stdout.write(f"No agents found for: {query}\n")
+        else:
+            sys.stdout.write(f"Found {len(results)} agent(s):\n")
+            for r in results:
+                sys.stdout.write(f"  {r['id'][:12]}  {r['name']}\n")
+                if r.get("description"):
+                    sys.stdout.write(f"    {r['description'][:80]}\n")
 
 
 # ── schema ────────────────────────────────────────────────────────────────────
