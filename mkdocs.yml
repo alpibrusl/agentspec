@@ -1,7 +1,7 @@
 site_name: AgentSpec
 site_description: Universal agent manifest standard with resolver, signed profiles, and Noether composition
 site_author: Alfonso Sastre
-site_url: https://alpibrusl.github.io/agentspec/
+site_url: https://agentspec.alpibru.com/
 repo_url: https://github.com/alpibrusl/agentspec
 repo_name: alpibrusl/agentspec
 edit_uri: edit/main/docs/
