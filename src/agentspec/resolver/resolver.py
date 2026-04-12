@@ -151,7 +151,17 @@ def _resolve_model(
     available: dict[str, bool],
     decisions: list[str],
 ) -> tuple[str | None, str, str]:
-    """Try each preferred model in order, checking runtime + auth."""
+    """Try each preferred model in order, checking runtime + auth.
+
+    When Vertex AI is configured (GOOGLE_CLOUD_PROJECT + ADC), claude-code
+    and gemini-cli route through it instead of direct provider APIs.
+    """
+    from agentspec.resolver.vertex import detect_vertex_ai, can_route_through_vertex
+
+    vertex = detect_vertex_ai()
+    if vertex:
+        decisions.append(f"  Vertex AI detected: {vertex}")
+
     for preferred in model_spec.preferred:  # type: ignore[union-attr]
         provider = preferred.split("/")[0]
         if provider not in PROVIDER_MAP:
@@ -164,9 +174,17 @@ def _resolve_model(
             decisions.append(f"  skip {preferred}: {runtime_name} not in PATH")
             continue
 
+        # Vertex AI path: route through GCP if available and provider supports it
+        if vertex and can_route_through_vertex(provider):
+            auth_source = str(vertex)
+            decisions.append(
+                f"  selected {preferred} via {runtime_name} (Vertex AI: {vertex.location})"
+            )
+            return preferred, runtime_name, auth_source
+
+        # Direct provider API path (original behavior)
         if env_key and not os.environ.get(env_key):
-            # Check auth spec for alternative source
-            decisions.append(f"  skip {preferred}: {env_key} not set")
+            decisions.append(f"  skip {preferred}: {env_key} not set (and Vertex AI not configured)")
             continue
 
         auth_source = f"env.{env_key}" if env_key else "local socket"
@@ -179,7 +197,6 @@ def _resolve_model(
         decisions.append(f"  Trying fallback capability: {fallback}")
         defaults = _capability_defaults(fallback)
         if defaults:
-            # Build a minimal spec-like object
             class FallbackSpec:
                 preferred = defaults
                 fallback = None

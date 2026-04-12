@@ -65,6 +65,7 @@ nav:
   - Guides:
       - Base Templates: guides/bases.md
       - Multi-Runtime: guides/multi-runtime.md
+      - Vertex AI Backend: guides/vertex-ai.md
       - Registry: guides/registry.md
       - Cold Start: guides/cold-start.md
       - Sprint Integration: guides/sprints.md

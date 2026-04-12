@@ -5,6 +5,30 @@ All notable changes to AgentSpec will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] — 2026-04-12
+
+### Added
+
+- **Vertex AI backend support** (`agentspec.resolver.vertex`). When
+  `GOOGLE_CLOUD_PROJECT` is set and Application Default Credentials are
+  available, the resolver routes claude-code, gemini-cli, aider, and
+  opencode through Vertex AI instead of direct provider APIs. Default
+  region: `europe-west1` (EU data residency).
+- New env vars: `AGENTSPEC_VERTEX_PROJECT`, `AGENTSPEC_VERTEX_LOCATION`
+  (override the standard `GOOGLE_CLOUD_*` if needed).
+- Per-runtime env injection in the runner: `CLAUDE_CODE_USE_VERTEX=1`
+  for claude-code, `GOOGLE_GENAI_USE_VERTEXAI=true` for gemini-cli,
+  `VERTEX_PROJECT/LOCATION` for aider, base GCP env for opencode.
+- 21 new tests (`tests/test_vertex.py`) covering detection, routing,
+  per-runtime env, and runner env injection.
+
+### Notes
+
+- codex-cli (OpenAI) cannot route through Vertex AI — OpenAI models are
+  not on Vertex Model Garden. Continues to use OpenAI direct API.
+- Vertex AI takes precedence over direct API keys when both are
+  configured for a routable provider (claude/anthropic, gemini/google).
+
 ## [0.1.0] — 2026-04-12
 
 Initial public release.

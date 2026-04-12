@@ -6,6 +6,7 @@ selected runtime (claude-code, gemini-cli, codex-cli, etc.).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,7 @@ from pathlib import Path
 
 from agentspec.parser.manifest import AgentManifest
 from agentspec.resolver.resolver import ResolvedPlan
+from agentspec.resolver.vertex import detect_vertex_ai, vertex_env_for_runtime
 
 
 # Runtime → command builder
@@ -35,10 +37,30 @@ def build_command(plan: ResolvedPlan, manifest: AgentManifest, input_text: str |
 
 
 def execute(plan: ResolvedPlan, manifest: AgentManifest, input_text: str | None = None) -> int:
-    """Execute the agent by spawning the resolved runtime."""
+    """Execute the agent by spawning the resolved runtime.
+
+    If Vertex AI is configured (via GCP env vars + ADC), the relevant
+    backend env vars are injected so the spawned CLI talks to Vertex
+    instead of the direct provider API.
+    """
     cmd = build_command(plan, manifest, input_text)
-    result = subprocess.run(cmd)
+    env = build_env(plan)
+    result = subprocess.run(cmd, env=env)
     return result.returncode
+
+
+def build_env(plan: ResolvedPlan) -> dict[str, str]:
+    """Build the environment for the spawned runtime.
+
+    Inherits the current process env, then layers Vertex AI vars on top
+    when the resolver picked Vertex (auth_source contains 'vertex-ai').
+    """
+    env = dict(os.environ)
+    if "vertex-ai" in (plan.auth_source or "").lower():
+        vertex = detect_vertex_ai()
+        if vertex:
+            env.update(vertex_env_for_runtime(plan.runtime, vertex))
+    return env
 
 
 def _build_claude_cmd(
