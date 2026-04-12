@@ -26,15 +26,15 @@ noether stage search "agentspec"
 
 | Stage | ID | What |
 |---|---|---|
-| `agentspec_validate` | `a61021f8` | Schema validation |
-| `agentspec_resolve` | `d979bb0b` | Environment negotiation |
-| `agentspec_hash` | `dd86f6e2` | Content-addressable hashing |
-| `agentspec_merge` | `9df4c9dc` | Inheritance with trust check |
-| `agentspec_evolve` | `2a068663` | Retro-based evolution |
-| `agentspec_schema` | `7feb167c` | JSON Schema export |
-| `agentspec_profile_create` | `7d22e469` | Create profile from manifest |
-| `agentspec_profile_retro` | `d8995d46` | Process retro into signed memories |
-| `agentspec_profile_export` | `99be6346` | Export profile for registry |
+| `agentspec_validate` | `27980442` | Schema validation |
+| `agentspec_resolve` | `2a6da6ec` | Environment negotiation |
+| `agentspec_hash` | `99640059` | Content-addressable hashing |
+| `agentspec_merge` | `284128cf` | Inheritance with trust check |
+| `agentspec_evolve` | `002cebee` | Retro-based evolution |
+| `agentspec_schema` | `7ea3d017` | JSON Schema export |
+| `agentspec_profile_create` | `89146f8f` | Create profile from manifest |
+| `agentspec_profile_retro` | `23b7f0f1` | Process retro into signed memories |
+| `agentspec_profile_export` | `795d38b0` | Export profile for registry |
 
 Use them locally:
 

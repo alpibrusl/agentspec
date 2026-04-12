@@ -237,15 +237,15 @@ AgentSpec operations are registered as [Noether](https://github.com/alpibrusl/so
 noether stage search "agentspec"
 
 # Returns 9 stages:
-#   agentspec_validate    a61021f8
-#   agentspec_resolve     d979bb0b
-#   agentspec_hash        dd86f6e2
-#   agentspec_merge       9df4c9dc
-#   agentspec_evolve      2a068663
-#   agentspec_schema      7feb167c
-#   agentspec_profile_create  7d22e469
-#   agentspec_profile_retro   d8995d46
-#   agentspec_profile_export  99be6346
+#   agentspec_validate    27980442
+#   agentspec_resolve     2a6da6ec
+#   agentspec_hash        99640059
+#   agentspec_merge       284128cf
+#   agentspec_evolve      002cebee
+#   agentspec_schema      7ea3d017
+#   agentspec_profile_create  89146f8f
+#   agentspec_profile_retro   23b7f0f1
+#   agentspec_profile_export  795d38b0
 ```
 
 Compose AgentSpec operations with the 370+ other Noether stages (data, AI, web, infra) and serve them as HTTP APIs via `noether serve`.
