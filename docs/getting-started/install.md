@@ -14,7 +14,7 @@
 ## Install
 
 ```bash
-pip install agentspec
+pip install agentspec-alpibru
 ```
 
 ## Optional extras
@@ -27,7 +27,7 @@ pip install agentspec
 | `[dev]` | pytest, ruff, mypy | Contribute to AgentSpec |
 
 ```bash
-pip install "agentspec[signing,registry]"
+pip install "agentspec-alpibru[signing,registry]"
 ```
 
 ## Verify

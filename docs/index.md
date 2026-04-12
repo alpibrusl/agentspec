@@ -29,7 +29,7 @@ AgentSpec fills three gaps:
 
 ```bash
 # Install
-pip install agentspec
+pip install agentspec-alpibru
 
 # Create
 agentspec init my-researcher

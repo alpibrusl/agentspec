@@ -5,13 +5,13 @@
 ## Install
 
 ```bash
-pip install agentspec
+pip install agentspec-alpibru
 ```
 
 For Ed25519 signing (recommended for production):
 
 ```bash
-pip install "agentspec[signing]"
+pip install "agentspec-alpibru[signing]"
 ```
 
 ## Create your first agent

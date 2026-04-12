@@ -81,14 +81,14 @@ Result: AgentSpec ships as Python SDK + CLI. Everything else (registry, infra, d
 
 ```bash
 # Just AgentSpec (CLI + manifests)
-pip install agentspec
+pip install agentspec-alpibru
 
 # AgentSpec + local Noether (compositions)
-pip install agentspec
+pip install agentspec-alpibru
 cargo install --git https://github.com/alpibrusl/solv-noether
 
 # Full stack (with self-hosted registry)
-pip install agentspec
+pip install agentspec-alpibru
 git clone https://github.com/alpibrusl/noether-cloud
 cd noether-cloud/infra && docker compose up
 

@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentspec"
+name = "agentspec-alpibru"
 version = "0.1.0"
-description = "Universal agent manifest standard with resolver, signed profiles, and Noether composition — the missing layer between agent definitions and runtimes."
+description = "Universal agent manifest standard with resolver, signed profiles, and Noether composition — the missing layer between agent definitions and runtimes. (Import as `agentspec`.)"
 readme = "README.md"
 license = "EUPL-1.2"
 license-files = ["LICENSE"]

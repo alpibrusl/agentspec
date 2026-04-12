@@ -44,14 +44,17 @@ What makes AgentSpec unique:
 ## Install
 
 ```bash
-pip install agentspec
+pip install agentspec-alpibru
 ```
 
 Optional extras:
 
 ```bash
-pip install "agentspec[registry]"     # FastAPI registry server
-pip install "agentspec[signing]"      # Ed25519 via PyNaCl (recommended)
+pip install "agentspec-alpibru[registry]"     # FastAPI registry server
+pip install "agentspec-alpibru[signing]"      # Ed25519 via PyNaCl (recommended)
+
+# (The package is published as agentspec-alpibru on PyPI.
+#  In code, you still import it as `agentspec`.)
 ```
 
 ---
@@ -327,7 +330,7 @@ Full documentation: [agentspec.dev](https://alpibrusl.github.io/agentspec/)
 Or build locally:
 
 ```bash
-pip install "agentspec[docs]"
+pip install "agentspec-alpibru[docs]"
 mkdocs serve
 ```
 
