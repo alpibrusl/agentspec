@@ -39,10 +39,18 @@ agentspec push my.agent --registry http://localhost:3000
 
 ## Public registry
 
+A free, hosted registry is available at **https://registry.alpibru.com**:
+
 ```bash
-export AGENTSPEC_REGISTRY=https://registry.agentspec.dev
+export AGENTSPEC_REGISTRY=https://registry.alpibru.com
+
 agentspec search "ota pricing"
+agentspec pull <stage-id>
+agentspec push my.agent          # auth not yet enabled (beta)
 ```
+
+Beta status: stable, but rate limits and authentication are still being
+configured. Run a self-hosted instance for anything sensitive.
 
 ## How agents are stored
 
