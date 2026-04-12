@@ -131,7 +131,7 @@ class TestResolverIntegration:
     @patch("agentspec.resolver.vertex._adc_available", return_value=True)
     @patch.dict(
         "os.environ",
-        {"GOOGLE_CLOUD_PROJECT": "edreams-ds-experiments"},
+        {"GOOGLE_CLOUD_PROJECT": "my-vertex-project"},
         clear=True,
     )
     def test_claude_routes_through_vertex_when_configured(
@@ -157,7 +157,7 @@ class TestResolverIntegration:
         assert plan.runtime == "claude-code"
         assert "vertex-ai" in plan.auth_source.lower()
         assert "europe-west1" in plan.auth_source
-        assert "edreams-ds-experiments" in plan.auth_source
+        assert "my-vertex-project" in plan.auth_source
 
     @patch("agentspec.resolver.resolver._detect_runtimes")
     @patch("agentspec.resolver.vertex._adc_available", return_value=True)
