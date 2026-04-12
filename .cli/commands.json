@@ -245,7 +245,7 @@
     },
     {
       "name": "push",
-      "description": "Publish an agent to the local registry.",
+      "description": "Publish an agent to a registry (local or remote Noether registry).",
       "arguments": [
         {
           "name": "agent_path",
@@ -256,6 +256,12 @@
       ],
       "options": [
         {
+          "name": "registry",
+          "type": "string",
+          "description": "Remote registry URL (e.g. http://localhost:3000). Also reads AGENTSPEC_REGISTRY / NOETHER_REGISTRY env. type:string",
+          "default": ""
+        },
+        {
           "name": "output",
           "type": "OutputFormat",
           "description": "Output format. type:enum[text|json|table]",
@@ -266,8 +272,12 @@
       "idempotent": true,
       "examples": [
         {
-          "description": "Push an agent",
+          "description": "Push to local registry",
           "invocation": "agentspec push researcher.agent"
+        },
+        {
+          "description": "Push to remote registry",
+          "invocation": "agentspec push researcher.agent --registry http://localhost:3000"
         },
         {
           "description": "JSON output",
@@ -276,21 +286,28 @@
       ],
       "see_also": [
         "pull",
+        "search",
         "validate"
       ]
     },
     {
       "name": "pull",
-      "description": "Pull an agent from the local registry.",
+      "description": "Pull an agent from a registry (local or remote Noether registry).",
       "arguments": [
         {
           "name": "ref",
           "type": "string",
           "required": true,
-          "description": "Agent reference: ag1:<hash> or name@version. type:string"
+          "description": "Agent reference: registry stage ID or ag1:<hash>. type:string"
         }
       ],
       "options": [
+        {
+          "name": "registry",
+          "type": "string",
+          "description": "Remote registry URL. Also reads AGENTSPEC_REGISTRY / NOETHER_REGISTRY env. type:string",
+          "default": ""
+        },
         {
           "name": "output",
           "type": "OutputFormat",
@@ -302,16 +319,63 @@
       "idempotent": true,
       "examples": [
         {
-          "description": "Pull by hash",
+          "description": "Pull from local registry",
           "invocation": "agentspec pull ag1:abc123def456"
         },
         {
+          "description": "Pull from remote registry",
+          "invocation": "agentspec pull abc123def456 --registry http://localhost:3000"
+        },
+        {
           "description": "JSON output",
-          "invocation": "agentspec pull ag1:abc123def456 --output json"
+          "invocation": "agentspec pull ag1:abc123 --output json"
         }
       ],
       "see_also": [
-        "push"
+        "push",
+        "search"
+      ]
+    },
+    {
+      "name": "search",
+      "description": "Search for agents in a remote Noether registry.",
+      "arguments": [
+        {
+          "name": "query",
+          "type": "string",
+          "required": true,
+          "description": "Search query. type:string"
+        }
+      ],
+      "options": [
+        {
+          "name": "registry",
+          "type": "string",
+          "description": "Registry URL. Also reads AGENTSPEC_REGISTRY / NOETHER_REGISTRY env. type:string",
+          "default": ""
+        },
+        {
+          "name": "output",
+          "type": "OutputFormat",
+          "description": "Output format. type:enum[text|json|table]",
+          "default": "text"
+        }
+      ],
+      "subcommands": [],
+      "idempotent": true,
+      "examples": [
+        {
+          "description": "Search for researcher agents",
+          "invocation": "agentspec search researcher --registry http://localhost:3000"
+        },
+        {
+          "description": "JSON output",
+          "invocation": "agentspec search coder --registry http://localhost:3000 --output json"
+        }
+      ],
+      "see_also": [
+        "push",
+        "pull"
       ]
     },
     {

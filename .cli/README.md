@@ -43,13 +43,19 @@ Idempotent: False
 
 ### push
 
-Publish an agent to the local registry.
+Publish an agent to a registry (local or remote Noether registry).
 
 Idempotent: True
 
 ### pull
 
-Pull an agent from the local registry.
+Pull an agent from a registry (local or remote Noether registry).
+
+Idempotent: True
+
+### search
+
+Search for agents in a remote Noether registry.
 
 Idempotent: True
 
