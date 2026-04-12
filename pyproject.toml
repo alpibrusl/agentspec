@@ -32,6 +32,16 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
 ]
+signing = [
+    "PyNaCl>=1.5",
+]
+registry = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
+docs = [
+    "mkdocs-material>=9.5",
+]
 
 [project.scripts]
 agentspec = "agentspec.cli.main:main"

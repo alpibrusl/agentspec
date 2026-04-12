@@ -1,0 +1,83 @@
+site_name: AgentSpec
+site_description: Universal agent manifest standard with resolver, signed profiles, and Noether composition
+site_author: Alfonso Sastre
+site_url: https://alpibrusl.github.io/agentspec/
+repo_url: https://github.com/alpibrusl/agentspec
+repo_name: alpibrusl/agentspec
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Quick Start: getting-started/quickstart.md
+      - Installation: getting-started/install.md
+      - Your First Agent: getting-started/first-agent.md
+  - Concepts:
+      - The .agent Format: concepts/format.md
+      - Resolver: concepts/resolver.md
+      - Inheritance & Trust: concepts/inheritance.md
+      - Profiles & Signing: concepts/profiles.md
+      - Noether Integration: concepts/noether.md
+  - Guides:
+      - Base Templates: guides/bases.md
+      - Multi-Runtime: guides/multi-runtime.md
+      - Registry: guides/registry.md
+      - Cold Start: guides/cold-start.md
+      - Sprint Integration: guides/sprints.md
+  - CLI Reference:
+      - Overview: cli/overview.md
+      - Commands: cli/commands.md
+  - API Reference:
+      - Models: api/models.md
+      - Resolver: api/resolver.md
+      - Profile Manager: api/profile.md
+  - Ecosystem:
+      - AgentSpec + Noether + Caloron: ecosystem/overview.md
+      - Comparison: ecosystem/comparison.md
+
+plugins:
+  - search
