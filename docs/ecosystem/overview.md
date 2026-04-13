@@ -11,7 +11,7 @@ The standard + CLI + SDK + profile system. Open source (EUPL-1.2).
 What you write: `.agent` files
 What you run: `agentspec run my.agent`
 
-### [solv-noether](https://github.com/alpibrusl/solv-noether)
+### [noether](https://github.com/alpibrusl/noether)
 
 Verified composition platform. Content-addressed stages, type-safe, composable.
 
@@ -49,7 +49,7 @@ What AgentSpec uses: agent definitions, profiles for HR Agent context, evolution
 └────────────────────┬─────────────────────────────────────┘
                      │
 ┌────────────────────▼─────────────────────────────────────┐
-│  solv-noether   (composition engine)                     │
+│  noether        (composition engine)                     │
 │    typed, content-addressed, composable stages           │
 │    serve, build, compose CLI                             │
 └────────────────────┬─────────────────────────────────────┘
@@ -85,7 +85,7 @@ pip install agentspec-alpibru
 
 # AgentSpec + local Noether (compositions)
 pip install agentspec-alpibru
-cargo install --git https://github.com/alpibrusl/solv-noether
+cargo install --git https://github.com/alpibrusl/noether
 
 # Full stack (with self-hosted registry)
 pip install agentspec-alpibru

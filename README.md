@@ -231,7 +231,7 @@ agentspec --help              # structured help
 
 ## Noether Integration
 
-AgentSpec operations are registered as [Noether](https://github.com/alpibrusl/solv-noether) stages — content-addressed, type-safe, composable:
+AgentSpec operations are registered as [Noether](https://github.com/alpibrusl/noether) stages — content-addressed, type-safe, composable:
 
 ```bash
 noether stage search "agentspec"
@@ -341,7 +341,7 @@ mkdocs serve
 This is part of a larger ecosystem:
 
 - [agentspec](https://github.com/alpibrusl/agentspec) — this repo
-- [solv-noether](https://github.com/alpibrusl/solv-noether) — Noether composition engine
+- [noether](https://github.com/alpibrusl/noether) — Noether composition engine
 - [noether-cloud](https://github.com/alpibrusl/noether-cloud) — registry + enterprise infra
 - [caloron-noether](https://github.com/alpibrusl/caloron-noether) — autonomous sprint orchestrator (uses AgentSpec for agent definitions)
 - [acli](https://github.com/alpibrusl/acli) — agent-friendly CLI standard

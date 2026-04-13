@@ -1,6 +1,6 @@
 # Noether Integration
 
-AgentSpec operations are registered as [Noether](https://github.com/alpibrusl/solv-noether) stages — content-addressed, type-safe, composable units of computation.
+AgentSpec operations are registered as [Noether](https://github.com/alpibrusl/noether) stages — content-addressed, type-safe, composable units of computation.
 
 ## Why Noether?
 
