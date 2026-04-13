@@ -63,14 +63,35 @@ def build_env(plan: ResolvedPlan) -> dict[str, str]:
     return env
 
 
+def _derive_prompt(manifest: AgentManifest, input_text: str | None) -> str | None:
+    """Pick the best prompt for the agent when --input was omitted.
+
+    Precedence:
+    1. Explicit ``input_text`` (passed to ``agentspec run --input``)
+    2. ``SOUL.md`` content (directory-format agents carry it on ``manifest.soul``)
+    3. Agent description
+
+    Returns None only when the agent has no usable prompt at all — the caller
+    decides what to do (most runtimes interpret "no prompt" as interactive mode).
+    """
+    if input_text:
+        return input_text
+    if manifest.soul:
+        return manifest.soul.strip()
+    if manifest.description:
+        return manifest.description
+    return None
+
+
 def _build_claude_cmd(
     plan: ResolvedPlan, manifest: AgentManifest, input_text: str | None
 ) -> list[str]:
     cmd = ["claude"]
     if plan.system_prompt:
         cmd.extend(["--system-prompt", plan.system_prompt])
-    if input_text:
-        cmd.extend(["-p", input_text])
+    prompt = _derive_prompt(manifest, input_text)
+    if prompt:
+        cmd.extend(["-p", prompt])
     return cmd
 
 
@@ -78,8 +99,9 @@ def _build_gemini_cmd(
     plan: ResolvedPlan, manifest: AgentManifest, input_text: str | None
 ) -> list[str]:
     cmd = ["gemini"]
-    if input_text:
-        cmd.extend(["--prompt", input_text])
+    prompt = _derive_prompt(manifest, input_text)
+    if prompt:
+        cmd.extend(["--prompt", prompt])
     return cmd
 
 
@@ -88,22 +110,32 @@ def _build_codex_cmd(
 ) -> list[str]:
     cmd = ["codex"]
     if plan.system_prompt:
-        # Write instructions to temp file
         tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False)
         tmp.write(plan.system_prompt)
         tmp.close()
         cmd.extend(["--instructions", tmp.name])
-    if input_text:
-        cmd.append(input_text)
+    prompt = _derive_prompt(manifest, input_text)
+    if prompt:
+        cmd.append(prompt)
     return cmd
 
 
 def _build_opencode_cmd(
     plan: ResolvedPlan, manifest: AgentManifest, input_text: str | None
 ) -> list[str]:
-    cmd = ["opencode"]
-    if input_text:
-        cmd.extend(["--prompt", input_text])
+    """Invoke opencode non-interactively.
+
+    opencode's `--print` mode accepts a single positional prompt and emits the
+    model's response to stdout. We prepend the resolver-built system prompt so
+    opencode (which selects the model itself) still gets the agent's persona
+    and traits.
+    """
+    cmd = ["opencode", "--print"]
+    prompt = _derive_prompt(manifest, input_text) or ""
+    if plan.system_prompt:
+        prompt = f"{plan.system_prompt}\n\n{prompt}".strip()
+    if prompt:
+        cmd.append(prompt)
     return cmd
 
 

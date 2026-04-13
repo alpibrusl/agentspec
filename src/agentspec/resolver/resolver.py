@@ -134,6 +134,9 @@ def _detect_runtimes() -> dict[str, bool]:
 # ── Model resolution ──────────────────────────────────────────────────────────
 
 # provider prefix → (preferred runtime, env key for API auth)
+#
+# When env_key is None, the runtime manages its own auth/model selection
+# (e.g. opencode, aider, ollama) and just needs to be present in PATH.
 PROVIDER_MAP: dict[str, tuple[str, str | None]] = {
     "claude": ("claude-code", "ANTHROPIC_API_KEY"),
     "anthropic": ("claude-code", "ANTHROPIC_API_KEY"),
@@ -142,6 +145,8 @@ PROVIDER_MAP: dict[str, tuple[str, str | None]] = {
     "openai": ("codex-cli", "OPENAI_API_KEY"),
     "local": ("ollama", None),
     "ollama": ("ollama", None),
+    "opencode": ("opencode", None),
+    "aider": ("aider", None),
 }
 
 

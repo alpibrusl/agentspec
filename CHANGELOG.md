@@ -5,6 +5,33 @@ All notable changes to AgentSpec will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] — 2026-04-13
+
+### Fixed
+
+- **Resolver: `opencode/default` and `aider/default` no longer fall through as
+  unknown providers.** Both runtimes manage their own auth/model selection —
+  the resolver now recognises them as valid providers that need only binary
+  presence in PATH, not API keys.
+- **Runner: `agentspec run <dir>` no longer crashes claude-code with
+  "Input must be provided either through stdin or as a prompt argument".**
+  When `--input` is omitted, the runner now derives a prompt from the agent's
+  `SOUL.md` (for directory-format agents) or `description` field. Same fallback
+  applies to gemini-cli and codex-cli.
+- **Runner: opencode invocation updated to `opencode --print "<prompt>"`** —
+  the non-interactive mode — instead of the previous `--prompt` flag. System
+  prompts are prepended to the user prompt so opencode (which picks its own
+  model) still sees the agent's persona and traits.
+
+Reported by an integrator building the `llm-wiki` pipeline. Thanks.
+
+### Added
+
+- New helper `agentspec.runner.runner._derive_prompt` — single source of truth
+  for the input/SOUL.md/description fallback chain. Used by all non-ollama
+  runners.
+- 12 regression tests in `tests/test_issue_opencode_and_fallback.py`.
+
 ## [0.2.0] — 2026-04-12
 
 ### Added
