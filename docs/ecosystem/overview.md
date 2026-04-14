@@ -85,16 +85,15 @@ pip install agentspec-alpibru
 
 # AgentSpec + local Noether (compositions)
 pip install agentspec-alpibru
-cargo install --git https://github.com/alpibrusl/noether
+cargo install noether-cli
 
-# Full stack (with self-hosted registry)
-pip install agentspec-alpibru
-git clone https://github.com/alpibrusl/noether-cloud
-cd noether-cloud/infra && docker compose up
+# Use the hosted public registry
+export AGENTSPEC_REGISTRY=https://registry.alpibru.com
+agentspec search "researcher"
 
 # Sprint orchestration
-git clone https://github.com/alpibrusl/caloron-noether
-cd caloron-noether && python orchestrator/orchestrator.py "your goal"
+pip install caloron-alpibru
+caloron init my-project && caloron sprint "your goal"
 ```
 
 ## License coherence

@@ -1,6 +1,6 @@
 # Registry
 
-Push, pull, and search agents from any [Noether-compatible](https://github.com/alpibrusl/noether-cloud) registry.
+Push, pull, and search agents from any Noether-compatible registry.
 
 ## Local (no registry)
 
@@ -11,35 +11,9 @@ agentspec push my.agent
 agentspec pull ag1:abc123
 ```
 
-## Self-hosted
-
-Run the noether-cloud registry:
-
-```bash
-git clone https://github.com/alpibrusl/noether-cloud
-cd noether-cloud/infra
-docker compose up
-```
-
-Now use it:
-
-```bash
-export AGENTSPEC_REGISTRY=http://localhost:3000
-
-agentspec push my.agent          # pushes to localhost:3000
-agentspec pull ag1:xxx            # pulls from localhost:3000
-agentspec search "researcher"     # searches localhost:3000
-```
-
-Or per-command:
-
-```bash
-agentspec push my.agent --registry http://localhost:3000
-```
-
 ## Public registry
 
-A free, hosted registry is available at **https://registry.alpibru.com**:
+The recommended path for most users is the free, hosted registry at **https://registry.alpibru.com**:
 
 ```bash
 export AGENTSPEC_REGISTRY=https://registry.alpibru.com
