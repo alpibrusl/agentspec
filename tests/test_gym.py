@@ -109,6 +109,49 @@ tools:
     return agent
 
 
+def test_discover_corpus_picks_up_yaml_and_yml(tmp_path: Path):
+    from agentspec.gym import discover_corpus
+
+    (tmp_path / "a.yaml").write_text("id: a\ngoal: g\n")
+    (tmp_path / "b.yml").write_text("id: b\ngoal: g\n")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "c.yaml").write_text("id: c\ngoal: g\n")
+    (tmp_path / "notes.md").write_text("ignore me")
+
+    found = discover_corpus(tmp_path)
+    names = sorted(p.name for p in found)
+    assert names == ["a.yaml", "b.yml", "c.yaml"]
+
+
+def test_run_corpus_aggregates(tmp_path: Path):
+    from agentspec.gym import run_corpus
+
+    agent = _write_minimal_agent(tmp_path)
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+
+    # One task whose assertion will pass (file is seeded), one whose assertion
+    # will fail. Since we use dry_run the agent never actually executes.
+    (corpus_dir / "pass.yaml").write_text(
+        "id: pass\n"
+        "goal: noop\n"
+        "setup:\n  files:\n    hi.txt: hello\n"
+        "assertions:\n  - type: file_exists\n    path: hi.txt\n"
+    )
+    (corpus_dir / "fail.yaml").write_text(
+        "id: fail\n"
+        "goal: noop\n"
+        "assertions:\n  - type: file_exists\n    path: missing.txt\n"
+    )
+
+    summary = run_corpus(agent, corpus_dir, dry_run=True)
+    assert summary.total_tasks == 2
+    assert summary.fully_passed == 1
+    assert summary.total_assertions == 2
+    assert summary.passed_assertions == 1
+    assert 0.0 < summary.task_pass_rate < 1.0
+
+
 def test_run_task_dry_run_with_setup(tmp_path: Path):
     agent = _write_minimal_agent(tmp_path)
     task = Task(

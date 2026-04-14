@@ -667,7 +667,12 @@ app.add_typer(gym_app, name="gym")
 @gym_app.command("run")
 def gym_run(
     agent_path: str = typer.Argument(help="Path to .agent file or directory. type:path"),
-    task_path: str = typer.Argument(help="Path to a task YAML fixture. type:path"),
+    task_path: str = typer.Argument(
+        "", help="Path to a task YAML fixture (omit when using --corpus). type:path"
+    ),
+    corpus: str = typer.Option(
+        "", "--corpus", help="Run every *.yaml task under this directory. type:path"
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Skip agent execution; only score assertions. type:bool"
     ),
@@ -675,14 +680,48 @@ def gym_run(
         OutputFormat.text, "--output", help="Output format. type:enum[text|json|table]"
     ),
 ) -> None:
-    """Run an agent spec against a task fixture and print the score."""
-    from agentspec.gym import load_task, run_task
+    """Run an agent spec against a task fixture (or a whole corpus) and print the score."""
+    from agentspec.gym import load_task, run_corpus, run_task
     from agentspec.gym.runner import result_to_json
 
     start = time.time()
 
     if not Path(agent_path).exists():
         raise NotFoundError(f"Agent not found: {agent_path}")
+    if not corpus and not task_path:
+        raise InvalidArgsError("Provide either a task path or --corpus <dir>")
+    if corpus and task_path:
+        raise InvalidArgsError("Use either a task path OR --corpus, not both")
+
+    if corpus:
+        if not Path(corpus).is_dir():
+            raise NotFoundError(f"Corpus not found: {corpus}")
+        summary = run_corpus(agent_path, corpus, dry_run=dry_run)
+        if output == OutputFormat.json:
+            emit(
+                success_envelope(
+                    "gym.run", summary.to_dict(), version="0.1.0", start_time=start
+                ),
+                output,
+            )
+            return
+        sys.stdout.write(
+            f"Corpus:  {corpus} ({summary.total_tasks} task(s))\n"
+            f"Result:  {summary.fully_passed}/{summary.total_tasks} tasks fully passed "
+            f"({summary.task_pass_rate:.0%}); "
+            f"{summary.passed_assertions}/{summary.total_assertions} assertions "
+            f"({summary.assertion_pass_rate:.0%}) in {summary.duration_s:.2f}s\n\n"
+        )
+        for r in summary.results:
+            mark = "PASS" if r.failed == 0 and r.passed > 0 else "FAIL"
+            sys.stdout.write(
+                f"  [{mark}] {r.task_id:<30} {r.passed}/{r.passed + r.failed} "
+                f"({r.duration_s:.1f}s)\n"
+            )
+        if summary.fully_passed < summary.total_tasks:
+            raise SystemExit(1)
+        return
+
     if not Path(task_path).exists():
         raise NotFoundError(f"Task not found: {task_path}")
 

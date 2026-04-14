@@ -130,3 +130,74 @@ def run_task(
 
 def result_to_json(result: GymResult) -> str:
     return json.dumps(asdict(result), indent=2)
+
+
+# ── Batch / corpus mode ─────────────────────────────────────────────────────
+
+
+@dataclass
+class BatchSummary:
+    """Aggregate across a corpus run."""
+
+    total_tasks: int = 0
+    fully_passed: int = 0  # tasks where every assertion passed
+    total_assertions: int = 0
+    passed_assertions: int = 0
+    duration_s: float = 0.0
+    results: list[GymResult] = field(default_factory=list)
+
+    @property
+    def task_pass_rate(self) -> float:
+        return self.fully_passed / self.total_tasks if self.total_tasks else 0.0
+
+    @property
+    def assertion_pass_rate(self) -> float:
+        return (
+            self.passed_assertions / self.total_assertions
+            if self.total_assertions
+            else 0.0
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "total_tasks": self.total_tasks,
+            "fully_passed": self.fully_passed,
+            "total_assertions": self.total_assertions,
+            "passed_assertions": self.passed_assertions,
+            "duration_s": round(self.duration_s, 3),
+            "task_pass_rate": round(self.task_pass_rate, 3),
+            "assertion_pass_rate": round(self.assertion_pass_rate, 3),
+            "results": [asdict(r) for r in self.results],
+        }
+
+
+def discover_corpus(corpus_dir: str | Path) -> list[Path]:
+    """Return every *.yaml / *.yml task fixture under ``corpus_dir``."""
+    root = Path(corpus_dir)
+    if not root.is_dir():
+        raise NotADirectoryError(f"Corpus directory not found: {root}")
+    return sorted(p for p in root.rglob("*.y*ml") if p.is_file())
+
+
+def run_corpus(
+    spec_path: str | Path,
+    corpus_dir: str | Path,
+    *,
+    dry_run: bool = False,
+) -> BatchSummary:
+    """Run every task fixture in ``corpus_dir`` against ``spec_path``."""
+    from agentspec.gym.task import load_task  # local import to avoid cycles
+
+    fixtures = discover_corpus(corpus_dir)
+    summary = BatchSummary(total_tasks=len(fixtures))
+    start = time.time()
+    for f in fixtures:
+        task = load_task(f)
+        result = run_task(spec_path, task, dry_run=dry_run)
+        summary.results.append(result)
+        summary.total_assertions += result.passed + result.failed
+        summary.passed_assertions += result.passed
+        if result.failed == 0 and (result.passed > 0):
+            summary.fully_passed += 1
+    summary.duration_s = time.time() - start
+    return summary
