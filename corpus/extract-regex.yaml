@@ -1,0 +1,20 @@
+id: extract-regex
+goal: |
+  Create src/emails.py with a function `find_emails(text: str) -> list[str]`
+  that returns all email addresses in `text` (order preserved, duplicates
+  removed while keeping first occurrence). Create tests covering multi-line
+  input, duplicate handling, and no-match input.
+timeout_s: 180
+setup: {}
+assertions:
+  - type: file_exists
+    path: src/emails.py
+  - type: file_contains
+    path: src/emails.py
+    pattern: "def find_emails"
+  - type: file_not_contains
+    path: src/emails.py
+    pattern: "TODO"
+  - type: command
+    cmd: ["python", "-m", "pytest", "-q", "tests/"]
+    expect_exit: 0

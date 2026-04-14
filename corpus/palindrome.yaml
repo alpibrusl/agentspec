@@ -1,0 +1,24 @@
+id: palindrome
+goal: |
+  Create src/palindrome.py exposing a function `is_palindrome(s: str) -> bool`
+  that returns True when s equals its reverse (case-insensitive, ignoring
+  whitespace and punctuation). Create tests/test_palindrome.py that exercises
+  the happy path and at least one edge case.
+timeout_s: 180
+setup:
+  files:
+    README.md: |
+      # palindrome corpus task
+      Evaluation of an agent's ability to implement a small pure function
+      with tests.
+assertions:
+  - type: file_exists
+    path: src/palindrome.py
+  - type: file_contains
+    path: src/palindrome.py
+    pattern: "def is_palindrome"
+  - type: file_exists
+    path: tests/test_palindrome.py
+  - type: command
+    cmd: ["python", "-m", "pytest", "-q", "tests/"]
+    expect_exit: 0

@@ -658,6 +658,73 @@ def _print_plan_text(plan: ResolvedPlan, verbose: bool = False) -> None:
             sys.stdout.write(f"    {d}\n")
 
 
+# ── gym ───────────────────────────────────────────────────────────────────────
+
+gym_app = typer.Typer(help="Tune and test agents against task fixtures in isolation")
+app.add_typer(gym_app, name="gym")
+
+
+@gym_app.command("run")
+def gym_run(
+    agent_path: str = typer.Argument(help="Path to .agent file or directory. type:path"),
+    task_path: str = typer.Argument(help="Path to a task YAML fixture. type:path"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Skip agent execution; only score assertions. type:bool"
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.text, "--output", help="Output format. type:enum[text|json|table]"
+    ),
+) -> None:
+    """Run an agent spec against a task fixture and print the score."""
+    from agentspec.gym import load_task, run_task
+    from agentspec.gym.runner import result_to_json
+
+    start = time.time()
+
+    if not Path(agent_path).exists():
+        raise NotFoundError(f"Agent not found: {agent_path}")
+    if not Path(task_path).exists():
+        raise NotFoundError(f"Task not found: {task_path}")
+
+    task = load_task(task_path)
+    result = run_task(agent_path, task, dry_run=dry_run)
+
+    if output == OutputFormat.json:
+        emit(
+            success_envelope(
+                "gym.run",
+                json.loads(result_to_json(result)),
+                version="0.1.0",
+                start_time=start,
+            ),
+            output,
+        )
+        return
+
+    sys.stdout.write(f"Task:    {result.task_id}\n")
+    sys.stdout.write(f"Agent:   {result.agent_hash}\n")
+    sys.stdout.write(
+        f"Result:  {result.passed}/{result.passed + result.failed} assertions passed "
+        f"({result.pass_rate:.0%}) in {result.duration_s}s\n"
+    )
+    if result.dry_run:
+        sys.stdout.write("Mode:    dry-run (agent not executed)\n")
+    if result.command:
+        sys.stdout.write(f"Command: {' '.join(result.command)}\n")
+    sys.stdout.write("\n")
+    for a in result.assertions:
+        mark = "PASS" if a["passed"] else "FAIL"
+        sys.stdout.write(f"  [{mark}] {a['type']}")
+        if a["detail"]:
+            sys.stdout.write(f" — {a['detail']}")
+        sys.stdout.write("\n")
+    if result.stderr_tail:
+        sys.stdout.write(f"\nstderr: {result.stderr_tail[-200:]}\n")
+
+    if result.failed:
+        raise SystemExit(1)
+
+
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 
 
