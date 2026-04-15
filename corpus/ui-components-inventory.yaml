@@ -1,0 +1,99 @@
+id: ui-components-inventory
+goal: |
+  Given the PRD below, produce `components.json` — a design artifact
+  that will be consumed by the architect + dev phases downstream.
+
+  The file must be valid JSON with this shape:
+
+    {
+      "components": [
+        {
+          "name": "PascalCaseName",
+          "purpose": "one-sentence role in the UI",
+          "props": [
+            {"name": "propName", "type": "string|number|boolean|object|array",
+             "required": true, "description": "..."}
+          ],
+          "state_variants": ["default", "loading", "error", "empty", "..."],
+          "notes": "optional free-form notes — accessibility, responsive, etc."
+        }
+      ]
+    }
+
+  Include at least 3 components covering the happy-path user flows in
+  the PRD. Prefer descriptive `state_variants` (loading, empty,
+  over-limit, etc.) over a generic "active" — the goal is to front-load
+  state considerations so downstream phases don't discover them mid-sprint.
+
+  Work in the current directory. Do not create any other files — this
+  is a design deliverable, not implementation.
+
+  === PRD ===
+  Product: Hotel rate anomaly dashboard for revenue managers.
+
+  User story: As a revenue manager, I need to spot hotels whose nightly
+  rates have drifted more than 2 standard deviations from their rolling
+  30-day average, so I can intervene before we lose pricing parity on
+  OTAs.
+
+  Core flows:
+  1. Landing page: table of properties, most-anomalous first, with
+     columns [property name, current rate, deviation score, last updated].
+     Filter by region and property class.
+  2. Detail view: sparkline of the last 30 days of rates, anomaly events
+     highlighted, with a free-text notes field for the RM to annotate
+     what they did about it.
+  3. Bulk actions: select N properties, export CSV of their anomaly
+     history for a date range.
+
+  Non-functional: desktop-only, must handle ~500 hotels without
+  pagination pain, loads in under 2s.
+
+timeout_s: 240
+setup:
+  files:
+    README.md: |
+      # ui-components-inventory — gym task fixture
+      Design-adjacent task: no code, just a structured components.json.
+assertions:
+  # File exists somewhere.
+  - type: file_exists_anywhere
+    glob: "**/components.json"
+
+  # Must be valid JSON.
+  - type: command_anywhere
+    glob: "**/components.json"
+    cmd: ["python", "-c", "import json,sys; json.load(open('components.json'))"]
+    expect_exit: 0
+
+  # Required top-level shape: has a "components" list with entries.
+  - type: command_anywhere
+    glob: "**/components.json"
+    cmd: ["python", "-c", "import json; d=json.load(open('components.json')); assert isinstance(d.get('components'), list) and len(d['components']) >= 3"]
+    expect_exit: 0
+
+  # Every component has name + props + state_variants.
+  - type: command_anywhere
+    glob: "**/components.json"
+    cmd: ["python", "-c", "import json; d=json.load(open('components.json')); [ (c['name'], c['props'], c['state_variants']) for c in d['components'] ]"]
+    expect_exit: 0
+
+  # Names are PascalCase (crude check — all entries match ^[A-Z][A-Za-z0-9]+$).
+  - type: command_anywhere
+    glob: "**/components.json"
+    cmd: ["python", "-c", "import json,re; d=json.load(open('components.json')); assert all(re.match(r'^[A-Z][A-Za-z0-9]+$', c['name']) for c in d['components'])"]
+    expect_exit: 0
+
+  # Reward designer-thinking: at least one component surfaces more than
+  # just a default state (loading/error/empty/something). This is the
+  # "front-load state considerations" signal.
+  - type: command_anywhere
+    glob: "**/components.json"
+    cmd: ["python", "-c", "import json; d=json.load(open('components.json')); assert any(len(c['state_variants']) >= 3 for c in d['components']), 'No component with >=3 state variants'"]
+    expect_exit: 0
+
+  # Props have types — rewards structured thinking over free text.
+  - type: command_anywhere
+    glob: "**/components.json"
+    cmd: ["python", "-c", "import json; d=json.load(open('components.json')); assert all('type' in p for c in d['components'] for p in c['props'])"]
+    expect_exit: 0
