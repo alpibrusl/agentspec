@@ -35,22 +35,56 @@ setup:
       [tool.pytest.ini_options]
       pythonpath = ["."]
 assertions:
-  - type: file_exists
-    path: src/api.py
-  - type: file_contains
-    path: src/api.py
+  # Structural — files exist somewhere under the worktree. Path-tolerant
+  # so an agent that wraps work in a subdirectory isn't penalised for
+  # the directory choice, only for the content.
+  - type: file_exists_anywhere
+    glob: "**/api.py"
+  - type: file_exists_anywhere
+    glob: "**/test_api.py"
+
+  # FastAPI + pydantic basics.
+  - type: file_contains_anywhere
+    glob: "**/api.py"
     pattern: "from fastapi import"
-  - type: file_contains
-    path: src/api.py
+  - type: file_contains_anywhere
+    glob: "**/api.py"
     pattern: "class Anomaly"
-  - type: file_contains
-    path: src/api.py
+  - type: file_contains_anywhere
+    glob: "**/api.py"
     pattern: "@app\\.get.*anomalies"
-  - type: file_exists
-    path: tests/test_api.py
-  - type: file_contains
-    path: tests/test_api.py
+
+  # Idiomatic pydantic: constrained score field. Rewards
+  # agents that use Field(ge=, le=) or similar validators over a bare
+  # `score: float`.
+  - type: file_contains_anywhere
+    glob: "**/api.py"
+    pattern: "Field\\(.*(ge|le|gt|lt)"
+
+  # Idiomatic FastAPI: typed response via response_model or a list[Model]
+  # return annotation on the route. Either form counts.
+  - type: file_contains_anywhere
+    glob: "**/api.py"
+    pattern: "(response_model\\s*=|->\\s*(list\\[|List\\[))"
+
+  # Tests use TestClient (not ad-hoc ASGI poking).
+  - type: file_contains_anywhere
+    glob: "**/test_api.py"
     pattern: "TestClient"
-  - type: command
-    cmd: ["python", "-m", "pytest", "tests/", "-q"]
+
+  # At least two test functions — 2× `def test_` anywhere in the file,
+  # non-greedy to allow arbitrary body length between them. Set to 2
+  # because empirically both agents write 2 — bumping to 3 would punish
+  # for a behaviour neither agent reliably exhibits, and we want the
+  # assertion to discriminate not just punish.
+  - type: file_contains_anywhere
+    glob: "**/test_api.py"
+    pattern: "def test_[\\s\\S]*?def test_"
+
+  # Tests pass. Glob on test_api.py so the pytest run happens in
+  # whichever project directory actually contains the generated tests
+  # (could be the workdir, could be a subdirectory the agent created).
+  - type: command_anywhere
+    glob: "**/test_api.py"
+    cmd: ["python", "-m", "pytest", "-q", "--rootdir", "."]
     expect_exit: 0

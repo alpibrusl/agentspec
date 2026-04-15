@@ -78,6 +78,59 @@ def test_command_assertion(tmp_path: Path):
     assert results[1].passed is False
 
 
+def test_file_exists_anywhere_finds_nested_file(tmp_path: Path):
+    (tmp_path / "proj" / "src").mkdir(parents=True)
+    (tmp_path / "proj" / "src" / "api.py").write_text("x = 1")
+    results = run_assertions(
+        tmp_path,
+        [
+            {"type": "file_exists_anywhere", "glob": "**/api.py"},
+            {"type": "file_exists_anywhere", "glob": "**/missing.py"},
+        ],
+    )
+    assert results[0].passed is True
+    assert "proj/src/api.py" in results[0].detail
+    assert results[1].passed is False
+
+
+def test_file_contains_anywhere_matches_any_glob_hit(tmp_path: Path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "api.py").write_text("no match here")
+    (tmp_path / "b").mkdir()
+    (tmp_path / "b" / "api.py").write_text("def read_file(): pass")
+    results = run_assertions(
+        tmp_path,
+        [
+            {"type": "file_contains_anywhere", "glob": "**/api.py", "pattern": "read_file"},
+            {"type": "file_contains_anywhere", "glob": "**/api.py", "pattern": "missing_fn"},
+        ],
+    )
+    assert results[0].passed is True
+    assert results[1].passed is False
+
+
+def test_command_anywhere_runs_in_nested_project(tmp_path: Path):
+    """command_anywhere should cd into the deepest glob match's parent."""
+    (tmp_path / "proj").mkdir()
+    # Write a marker file the command will detect to prove we cd'd correctly.
+    (tmp_path / "proj" / "pyproject.toml").write_text("[project]\nname='x'\n")
+    # Also a top-level pyproject; the deeper one should win.
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='top'\n")
+    results = run_assertions(
+        tmp_path,
+        [
+            {
+                "type": "command_anywhere",
+                "glob": "**/pyproject.toml",
+                "cmd": ["grep", "-q", "name='x'", "pyproject.toml"],
+                "expect_exit": 0,
+            }
+        ],
+    )
+    assert results[0].passed is True
+    assert "proj" in results[0].detail
+
+
 def test_unknown_assertion_type():
     results = run_assertions(Path("/tmp"), [{"type": "nope"}])
     assert results[0].passed is False
