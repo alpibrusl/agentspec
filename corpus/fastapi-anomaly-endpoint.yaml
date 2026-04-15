@@ -1,0 +1,56 @@
+id: fastapi-anomaly-endpoint
+goal: |
+  Build a small FastAPI service exposing `GET /anomalies`.
+
+  Requirements:
+  1. Create `src/api.py` with a FastAPI `app` and a `GET /anomalies`
+     route that returns a list of `Anomaly` objects.
+  2. `Anomaly` is a `pydantic.BaseModel` with fields:
+     id (int), score (float, 0.0-1.0), detected_at (datetime).
+  3. The endpoint returns at least one seeded example so the response
+     is never empty.
+  4. Create `tests/test_api.py` using FastAPI's TestClient that calls
+     `GET /anomalies` and asserts status 200 AND a non-empty list with
+     the expected fields on each item.
+  5. The test must pass under `python -m pytest tests/`.
+
+  Work in the current directory. Do not install packages (assume
+  fastapi, pydantic, pytest, and httpx are available).
+timeout_s: 300
+setup:
+  files:
+    README.md: |
+      # Anomaly API — gym task fixture
+      The agent must build src/api.py + tests/test_api.py per the goal.
+    pyproject.toml: |
+      [build-system]
+      requires = ["setuptools>=61"]
+      build-backend = "setuptools.build_meta"
+
+      [project]
+      name = "gym-anomaly-api"
+      version = "0.0.1"
+      requires-python = ">=3.11"
+
+      [tool.pytest.ini_options]
+      pythonpath = ["."]
+assertions:
+  - type: file_exists
+    path: src/api.py
+  - type: file_contains
+    path: src/api.py
+    pattern: "from fastapi import"
+  - type: file_contains
+    path: src/api.py
+    pattern: "class Anomaly"
+  - type: file_contains
+    path: src/api.py
+    pattern: "@app\\.get.*anomalies"
+  - type: file_exists
+    path: tests/test_api.py
+  - type: file_contains
+    path: tests/test_api.py
+    pattern: "TestClient"
+  - type: command
+    cmd: ["python", "-m", "pytest", "tests/", "-q"]
+    expect_exit: 0

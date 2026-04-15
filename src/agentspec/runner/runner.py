@@ -87,6 +87,13 @@ def _build_claude_cmd(
     plan: ResolvedPlan, manifest: AgentManifest, input_text: str | None
 ) -> list[str]:
     cmd = ["claude"]
+    # In autonomous runners (gym, caloron sprint) the agent needs tool
+    # access without interactive approval prompts. AGENTSPEC_GYM=1 opts
+    # into claude's permission bypass. `agentspec run` without that env
+    # keeps the default prompt-every-tool behaviour so interactive users
+    # aren't silently granting full access.
+    if os.environ.get("AGENTSPEC_GYM") == "1":
+        cmd.append("--dangerously-skip-permissions")
     if plan.system_prompt:
         cmd.extend(["--system-prompt", plan.system_prompt])
     prompt = _derive_prompt(manifest, input_text)

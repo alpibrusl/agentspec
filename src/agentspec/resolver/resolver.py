@@ -189,6 +189,17 @@ def _resolve_model(
 
         # Direct provider API path (original behavior)
         if env_key and not os.environ.get(env_key):
+            # claude-code and gemini-cli also support subscription auth:
+            # a logged-in CLI doesn't need an API key. If the runtime is
+            # one of those and its binary is present, trust it to manage
+            # its own auth.
+            if runtime_name in ("claude-code", "gemini-cli"):
+                auth_source = f"{runtime_name} subscription"
+                decisions.append(
+                    f"  selected {preferred} via {runtime_name} ({auth_source}; "
+                    f"{env_key} not set — assuming CLI is logged in)"
+                )
+                return preferred, runtime_name, auth_source
             decisions.append(f"  skip {preferred}: {env_key} not set (and Vertex AI not configured)")
             continue
 
