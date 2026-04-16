@@ -5,6 +5,54 @@ All notable changes to AgentSpec will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.3] — 2026-04-16
+
+Continued the post-install audit: installed cursor-agent 2026.04.15,
+opencode 1.4.6, and aider 0.86.2 rootless, ran live dry-runs against
+each. **Every CLI had at least one gap vs its real `--help`** — fixed
+here.
+
+### Added
+
+- **`cursor` provider prefix in `PROVIDER_MAP`.** Without this entry,
+  manifests declaring `cursor/<model>` fell through as "unknown
+  provider" and cursor-cli was unreachable via the resolver despite
+  the runtime being registered. Caught by live dry-run.
+- **cursor `--model <name>` threading.** `cursor-agent --model` takes
+  cursor-specific names (`gpt-5`, `sonnet-4`, `sonnet-4-thinking`).
+- **cursor `--force` under AGENTSPEC_GYM=1** for tool-approval bypass.
+- **opencode `-m/--model <provider/model>` threading.** opencode's
+  real flag takes a `provider/model` pair; manifest's caller-facing
+  `opencode/` prefix is stripped once so we pass what opencode expects.
+- **aider `--yes-always` under AGENTSPEC_GYM=1** for unattended runs.
+
+### Fixed
+
+- **cursor `-p` is now a bare flag**, not a prefix for the prompt.
+  Previous `[-p, <prompt>]` worked by accident (cursor-agent parsed
+  `-p` as a boolean and the next arg as positional) but the idiomatic
+  shape separates them.
+
+### Verified live (v0.3.3 argv against installed binaries)
+
+```
+cursor-agent -p --output-format text --force --model sonnet-4 "<prompt>"
+opencode run -m anthropic/claude-sonnet-4-6 "<prompt>"
+aider --yes-always --model claude-sonnet-4-6 --message "<prompt>"
+```
+
+All three match the binary's accepted argv exactly.
+
+### Tests
+
+- 161 → 170 green (9 new + 6 updated to v0.3.3 shapes).
+
+### Still unvalidated
+
+`ollama` is in the catalogue but couldn't be installed rootless —
+GitHub release assets 404 via the sandbox's network. No code changes
+this release; pinned to pre-existing builder.
+
 ## [0.3.2] — 2026-04-16
 
 Post-install verification of v0.3.1: both goose (1.30.0) and codex-cli

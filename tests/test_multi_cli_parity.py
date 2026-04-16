@@ -130,6 +130,57 @@ def test_runtime_binaries_cursor_points_at_cursor_agent():
     assert "cursor" not in RUNTIME_BINARIES  # old name purged
 
 
+def test_provider_map_has_cursor_prefix():
+    """Regression: without this entry the resolver rejects
+    cursor/<model> manifests as unknown-provider. Caught by live
+    dry-run after v0.3.1 shipped — fixed in v0.3.3."""
+    runtime, keys = PROVIDER_MAP["cursor"]
+    assert runtime == "cursor-cli"
+    # Cursor uses its own subscription auth; no API keys required.
+    assert keys is None
+
+
+def test_build_cursor_has_print_as_bare_flag():
+    """Verified against cursor-agent 2026.04.15 --help: -p/--print is
+    a boolean that enables non-interactive mode; the prompt is a
+    positional arg. Earlier builder passed `-p <prompt>` which
+    technically worked (cursor parsed -p as boolean + prompt as
+    positional) but the idiomatic form separates them."""
+    plan = ResolvedPlan(runtime="cursor-cli", model="cursor/sonnet-4")
+    cmd = _build_cursor_cmd(plan, _minimal_manifest(), "go")
+    p_idx = cmd.index("-p")
+    # -p should be followed by other flags, not the prompt.
+    assert cmd[p_idx + 1].startswith("-"), (
+        f"-p should be a bare boolean; got {cmd[p_idx + 1]!r} immediately after"
+    )
+
+
+def test_build_cursor_passes_model_flag():
+    """cursor-agent --help shows --model <model> takes cursor-specific
+    names like gpt-5, sonnet-4. Manifest's provider prefix is stripped."""
+    plan = ResolvedPlan(runtime="cursor-cli", model="cursor/sonnet-4-thinking")
+    cmd = _build_cursor_cmd(plan, _minimal_manifest(), "go")
+    assert "--model" in cmd
+    assert cmd[cmd.index("--model") + 1] == "sonnet-4-thinking"
+
+
+def test_build_cursor_adds_force_under_gym(monkeypatch):
+    """--force (alias --yolo) auto-approves tool calls. Added under
+    AGENTSPEC_GYM=1 so unattended runs don't stall on every tool
+    invocation."""
+    monkeypatch.setenv("AGENTSPEC_GYM", "1")
+    plan = ResolvedPlan(runtime="cursor-cli", model="cursor/sonnet-4")
+    cmd = _build_cursor_cmd(plan, _minimal_manifest(), "go")
+    assert "--force" in cmd
+
+
+def test_build_cursor_omits_force_outside_gym(monkeypatch):
+    monkeypatch.delenv("AGENTSPEC_GYM", raising=False)
+    plan = ResolvedPlan(runtime="cursor-cli", model="cursor/sonnet-4")
+    cmd = _build_cursor_cmd(plan, _minimal_manifest(), "go")
+    assert "--force" not in cmd
+
+
 def test_build_cursor_has_text_output_format():
     """Without --output-format text, cursor-agent's headless mode may
     emit control sequences or JSON that the consumer doesn't expect."""
@@ -140,26 +191,26 @@ def test_build_cursor_has_text_output_format():
     assert cmd[cmd.index("--output-format") + 1] == "text"
 
 
-def test_build_cursor_uses_p_for_non_interactive_prompt():
-    """cursor-agent's headless mode is `cursor-agent -p <prompt>`.
-    Without -p it drops into interactive mode and hangs the subprocess."""
-    plan = ResolvedPlan(runtime="cursor-cli", model="claude/sonnet")
+def test_build_cursor_passes_prompt_as_positional():
+    """cursor-agent's headless mode is `cursor-agent -p [flags...]
+    <prompt>` — -p is a boolean, prompt is the last positional."""
+    plan = ResolvedPlan(runtime="cursor-cli", model="cursor/sonnet-4")
     cmd = _build_cursor_cmd(plan, _minimal_manifest(), "ship it")
     assert "-p" in cmd
-    assert cmd[cmd.index("-p") + 1] == "ship it"
+    assert cmd[-1] == "ship it"
 
 
 def test_build_cursor_prepends_system_prompt():
     """cursor-agent has no dedicated --system-prompt on headless mode,
-    so we prepend it to the user prompt with a blank-line separator."""
+    so we prepend it to the user prompt. Prompt is the last positional
+    argument (after all flags)."""
     plan = ResolvedPlan(
         runtime="cursor-cli",
-        model="claude/sonnet",
+        model="cursor/sonnet-4",
         system_prompt="You cite sources.",
     )
     cmd = _build_cursor_cmd(plan, _minimal_manifest(), "summarise")
-    idx = cmd.index("-p")
-    combined = cmd[idx + 1]
+    combined = cmd[-1]
     assert combined.startswith("You cite sources.")
     assert "summarise" in combined
 
@@ -176,6 +227,52 @@ def test_cursor_runtime_dispatches_via_build_command():
 # ── opencode ───────────────────────────────────────────────────────────────
 
 
+def test_build_opencode_passes_model_with_one_prefix_stripped():
+    """opencode's -m takes ``<provider>/<model>`` (verified against
+    opencode 1.4.6 --help). Manifest's caller-facing ``opencode/``
+    prefix gets stripped so what we pass is the opencode-expected pair.
+
+    manifest: opencode/anthropic/claude-sonnet-4-6
+    cmd -m : anthropic/claude-sonnet-4-6
+    """
+    plan = ResolvedPlan(
+        runtime="opencode", model="opencode/anthropic/claude-sonnet-4-6"
+    )
+    cmd = _build_opencode_cmd(plan, _minimal_manifest(), "hi")
+    assert "-m" in cmd
+    assert cmd[cmd.index("-m") + 1] == "anthropic/claude-sonnet-4-6"
+
+
+def test_build_opencode_passes_model_without_prefix_unchanged():
+    """If the manifest already uses the bare ``provider/model`` form,
+    we pass it through as-is."""
+    plan = ResolvedPlan(
+        runtime="opencode", model="anthropic/claude-sonnet-4-6"
+    )
+    cmd = _build_opencode_cmd(plan, _minimal_manifest(), "hi")
+    assert cmd[cmd.index("-m") + 1] == "claude-sonnet-4-6"  # one prefix stripped
+
+
+def test_build_aider_adds_yes_always_under_gym(monkeypatch):
+    """aider --help v0.86: --yes-always auto-approves every confirmation.
+    Required for unattended runs or aider blocks on prompts."""
+    monkeypatch.setenv("AGENTSPEC_GYM", "1")
+    plan = ResolvedPlan(runtime="aider", model="aider/claude-sonnet-4-6")
+    from agentspec.runner.runner import _build_aider_cmd
+
+    cmd = _build_aider_cmd(plan, _minimal_manifest(), "hi")
+    assert "--yes-always" in cmd
+
+
+def test_build_aider_omits_yes_always_outside_gym(monkeypatch):
+    monkeypatch.delenv("AGENTSPEC_GYM", raising=False)
+    plan = ResolvedPlan(runtime="aider", model="aider/claude-sonnet-4-6")
+    from agentspec.runner.runner import _build_aider_cmd
+
+    cmd = _build_aider_cmd(plan, _minimal_manifest(), "hi")
+    assert "--yes-always" not in cmd
+
+
 def test_build_opencode_uses_run_subcommand():
     """The non-interactive form per https://opencode.ai/docs/cli/ is
     ``opencode run <prompt>``. The previous --print form produced the
@@ -190,22 +287,26 @@ def test_build_opencode_uses_run_subcommand():
 
 def test_build_opencode_prompt_is_single_positional():
     """opencode run takes one positional prompt arg — not split across
-    --prompt or multiple args."""
-    plan = ResolvedPlan(runtime="opencode", model="opencode/default")
+    --prompt or multiple args. The full shape with a model flag is
+    [opencode, run, -m, <model>, <prompt>]; prompt is the last arg."""
+    plan = ResolvedPlan(runtime="opencode", model="opencode/anthropic/claude-sonnet-4-6")
     cmd = _build_opencode_cmd(plan, _minimal_manifest(), "build a thing")
-    # cmd = ["opencode", "run", "build a thing"]
-    assert len(cmd) == 3
-    assert cmd[2] == "build a thing"
+    # Shape: opencode run -m anthropic/claude-sonnet-4-6 "build a thing"
+    assert cmd[0:2] == ["opencode", "run"]
+    assert cmd[-1] == "build a thing"
+    # prompt should not appear split into multiple positional args
+    assert cmd.count("build a thing") == 1
 
 
 def test_build_opencode_prepends_system_prompt():
-    """No --system-prompt flag on `opencode run`, so we prepend."""
+    """No --system-prompt flag on `opencode run`, so we prepend. The
+    combined prompt is the last arg of the command."""
     plan = ResolvedPlan(
-        runtime="opencode", model="opencode/default",
+        runtime="opencode", model="opencode/anthropic/claude-sonnet-4-6",
         system_prompt="You are a code reviewer.",
     )
     cmd = _build_opencode_cmd(plan, _minimal_manifest(), "review this PR")
-    combined = cmd[2]
+    combined = cmd[-1]
     assert "You are a code reviewer." in combined
     assert "review this PR" in combined
     # System prompt appears first with a blank line before user prompt
@@ -214,22 +315,24 @@ def test_build_opencode_prepends_system_prompt():
 
 def test_build_opencode_handles_empty_prompt():
     """When the manifest has no input_text and no soul, opencode run
-    is called with no positional prompt (empty string would break)."""
+    is called with just [opencode, run, -m, <model>] — no empty
+    positional prompt slot."""
     m = AgentManifest(
         apiVersion="agent/v1",
         name="noprompt",
         version="0.1.0",
         description="",
-        model=ModelSpec(preferred=["opencode/default"]),
+        model=ModelSpec(preferred=["opencode/anthropic/claude-sonnet-4-6"]),
         skills=[],
         tools=ToolsSpec(mcp=[], native=[]),
         behavior=BehaviorSpec(),
         trust=TrustSpec(),
         observability=ObservabilitySpec(),
     )
-    plan = ResolvedPlan(runtime="opencode", model="opencode/default")
+    plan = ResolvedPlan(runtime="opencode", model="opencode/anthropic/claude-sonnet-4-6")
     cmd = _build_opencode_cmd(plan, m, None)
-    assert cmd == ["opencode", "run"]
+    # No positional prompt; model flag present.
+    assert cmd == ["opencode", "run", "-m", "anthropic/claude-sonnet-4-6"]
 
 
 # ── codex-cli ──────────────────────────────────────────────────────────────

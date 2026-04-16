@@ -164,6 +164,10 @@ PROVIDER_MAP: dict[str, tuple[str, tuple[str, ...] | None]] = {
     "local": ("ollama", None),
     "ollama": ("ollama", None),
     "opencode": ("opencode", None),
+    # cursor-cli's own Pro/Max subscription handles auth; no API key
+    # needed from our side. Provider prefix "cursor" matches the
+    # manifest convention "cursor/<model-name>".
+    "cursor": ("cursor-cli", None),
     # goose picks its own provider/model from its own config + env
     # (goose configure writes ~/.config/goose/config.yaml; any of the
     # standard per-provider keys like ANTHROPIC_API_KEY /

@@ -113,11 +113,10 @@ class TestOpencodeProvider:
         )
         cmd = _build_opencode_cmd(plan, m, "hello world")
         assert cmd[0:2] == ["opencode", "run"]
-        # The prompt is a single positional argument — not split into --prompt
-        assert len(cmd) == 3
-        # System prompt is prepended to the user prompt
-        assert "You are an x." in cmd[2]
-        assert "hello world" in cmd[2]
+        # Prompt is the last positional (-m <model> may sit between run
+        # and the prompt now that v0.3.3 passes model through).
+        assert "You are an x." in cmd[-1]
+        assert "hello world" in cmd[-1]
 
 
 # ── Issue 2: claude-code without --input ──────────────────────────────────────

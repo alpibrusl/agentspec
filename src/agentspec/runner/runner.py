@@ -314,18 +314,35 @@ def _build_opencode_cmd(
 ) -> list[str]:
     """Invoke opencode non-interactively.
 
-    Per https://opencode.ai/docs/cli/ the non-interactive form is
-    ``opencode run <prompt>``. The default ``build`` agent has full
-    tool access (file write + shell) so no yolo flag is required or
-    exists for the ``run`` subcommand itself. Permission-sensitive
-    environments can scope access via the ``OPENCODE_PERMISSION`` env
-    var on the caller's side.
+    Non-interactive form: ``opencode run <message>``. Verified against
+    opencode 1.4.6's ``run --help`` output.
+
+    Supported flags we thread through:
+
+    - ``-m/--model <provider/model>`` — opencode wants the **full**
+      ``provider/model`` pair (unlike claude/gemini/goose which take
+      bare model names). We pass ``plan.model`` through unchanged.
+
+    No yolo flag exists on the ``run`` subcommand itself; the default
+    ``build`` agent has full tool access. Permission-sensitive
+    environments scope access via the ``OPENCODE_PERMISSION`` env var.
 
     opencode has no dedicated ``--system-prompt`` flag, so the
-    resolver-built system prompt is prepended to the user prompt
-    with a separator blank line.
+    resolver-built system prompt is prepended to the user prompt.
     """
     cmd = ["opencode", "run"]
+
+    if plan.model:
+        # Strip the caller-facing ``opencode/`` prefix so what we pass
+        # to ``-m`` is the ``provider/model`` pair opencode itself
+        # expects. Example:
+        #   manifest: opencode/anthropic/claude-sonnet-4-6
+        #   stripped: anthropic/claude-sonnet-4-6  ← what opencode wants
+        opencode_model = (
+            plan.model.split("/", 1)[1] if "/" in plan.model else plan.model
+        )
+        cmd.extend(["-m", opencode_model])
+
     prompt = _derive_prompt(manifest, input_text) or ""
     if plan.system_prompt:
         prompt = f"{plan.system_prompt}\n\n{prompt}".strip()
@@ -339,32 +356,78 @@ def _build_cursor_cmd(
 ) -> list[str]:
     """Invoke cursor-agent non-interactively.
 
+    Verified against cursor-agent 2026.04.15's ``--help`` output.
     Binary is ``cursor-agent`` (the ``cursor`` command is the desktop
-    editor). Per cursor.com/docs, headless mode is
-    ``cursor-agent -p <prompt> --output-format text``. Tool access is
-    on by default in agent mode; no yolo-style approval-bypass flag
-    is documented on the headless path.
+    editor).
 
-    cursor-agent has no dedicated system-prompt flag on the CLI; the
-    resolver-built system prompt is prepended to the user prompt.
+    Flag shape:
+
+    - ``-p/--print`` is a **boolean** that enables non-interactive
+      mode. Not a prompt-carrier — the prompt is a positional arg.
+    - ``--model <name>`` accepts cursor-specific names like ``gpt-5``,
+      ``sonnet-4``, ``sonnet-4-thinking``.
+    - ``--force`` / ``--yolo`` (aliases) auto-approves all tool calls.
+      Added under AGENTSPEC_GYM=1 so autonomous runs don't block.
+    - ``--output-format text|json|stream-json`` controls stdout shape.
+
+    No dedicated system-prompt flag; system prompt prepended to the
+    user prompt with a blank-line separator.
     """
-    cmd = ["cursor-agent", "--output-format", "text"]
+    cmd = ["cursor-agent", "-p", "--output-format", "text"]
+
+    if os.environ.get("AGENTSPEC_GYM") == "1":
+        cmd.append("--force")
+
+    model_name = _cursor_model_name(plan.model)
+    if model_name:
+        cmd.extend(["--model", model_name])
 
     prompt = _derive_prompt(manifest, input_text) or ""
     if plan.system_prompt:
         prompt = f"{plan.system_prompt}\n\n{prompt}".strip()
     if prompt:
-        cmd.extend(["-p", prompt])
+        cmd.append(prompt)
     return cmd
+
+
+def _cursor_model_name(model: str) -> str:
+    """Strip a ``provider/`` prefix for cursor-agent's ``--model`` flag.
+
+    cursor-agent uses its own short model names (``gpt-5``,
+    ``sonnet-4``, ``sonnet-4-thinking``). Callers who declare
+    ``claude/sonnet-4`` in their manifest get the bare ``sonnet-4``
+    passed through; users who want the thinking variant declare
+    ``cursor/sonnet-4-thinking`` or just ``sonnet-4-thinking``.
+    """
+    if not model:
+        return ""
+    if "/" in model:
+        return model.split("/", 1)[1]
+    return model
 
 
 def _build_aider_cmd(
     plan: ResolvedPlan, manifest: AgentManifest, input_text: str | None
 ) -> list[str]:
+    """Invoke aider non-interactively.
+
+    Verified against aider 0.86.2's ``--help`` output:
+
+    - ``--message <text>`` / ``-m <text>`` — single-shot prompt; aider
+      runs the message and exits.
+    - ``--model <name>`` — model selection (bare name).
+    - ``--yes-always`` — auto-approve all confirmations; added under
+      AGENTSPEC_GYM=1 so unattended runs don't block on prompts.
+    """
     cmd = ["aider"]
+
+    if os.environ.get("AGENTSPEC_GYM") == "1":
+        cmd.append("--yes-always")
+
     if plan.model:
         model_id = plan.model.split("/", 1)[-1] if "/" in plan.model else plan.model
         cmd.extend(["--model", model_id])
+
     if input_text:
         cmd.extend(["--message", input_text])
     return cmd
