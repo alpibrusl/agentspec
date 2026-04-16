@@ -136,7 +136,7 @@ def vertex_env_for_runtime(runtime: str, config: VertexConfig) -> dict[str, str]
         # OpenAI is NOT in Vertex Model Garden; cannot route
         return {}
 
-    if runtime == "cursor":
+    if runtime == "cursor-cli":
         # Cursor uses its own backend; not relevant
         return {}
 

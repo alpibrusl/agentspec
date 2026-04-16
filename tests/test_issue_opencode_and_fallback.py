@@ -92,8 +92,15 @@ class TestOpencodeProvider:
         plan = resolve(m)
         assert plan.runtime == "aider"
 
-    def test_opencode_cmd_uses_print_flag_with_positional_prompt(self):
-        """Verify the runner builds `opencode --print "{prompt}"` as the reporter described."""
+    def test_opencode_cmd_uses_run_subcommand_with_positional_prompt(self):
+        """Verify the runner builds `opencode run "{prompt}"`.
+
+        Updated from the original ``opencode --print`` assertion after
+        cross-checking the real CLI: opencode's non-interactive form
+        per https://opencode.ai/docs/cli/ is the ``run`` subcommand,
+        not ``--print``. Also matches caloron-noether's field-validated
+        FRAMEWORKS table entry for opencode.
+        """
         m = AgentManifest(
             name="x",
             description="test agent",
@@ -105,7 +112,7 @@ class TestOpencodeProvider:
             system_prompt="You are an x.",
         )
         cmd = _build_opencode_cmd(plan, m, "hello world")
-        assert cmd[0:2] == ["opencode", "--print"]
+        assert cmd[0:2] == ["opencode", "run"]
         # The prompt is a single positional argument — not split into --prompt
         assert len(cmd) == 3
         # System prompt is prepended to the user prompt

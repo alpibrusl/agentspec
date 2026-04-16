@@ -23,6 +23,7 @@ def build_command(plan: ResolvedPlan, manifest: AgentManifest, input_text: str |
     builders = {
         "claude-code": _build_claude_cmd,
         "gemini-cli": _build_gemini_cmd,
+        "cursor-cli": _build_cursor_cmd,
         "codex-cli": _build_codex_cmd,
         "opencode": _build_opencode_cmd,
         "aider": _build_aider_cmd,
@@ -86,20 +87,51 @@ def _derive_prompt(manifest: AgentManifest, input_text: str | None) -> str | Non
 def _build_claude_cmd(
     plan: ResolvedPlan, manifest: AgentManifest, input_text: str | None
 ) -> list[str]:
+    """Build an argv for claude-code.
+
+    Covered flags (verified via ``claude --help`` on v2+):
+
+    - ``--model <name>`` — model selection; accepts aliases like
+      ``sonnet`` / ``opus`` or full names like ``claude-sonnet-4-6``.
+      Extracted from ``plan.model`` with the provider prefix stripped.
+    - ``--system-prompt <text>`` — explicit system prompt. Claude has
+      a dedicated flag (unlike gemini-cli which reads GEMINI.md).
+    - ``-p/--print`` — non-interactive mode.
+    - ``--dangerously-skip-permissions`` — added under AGENTSPEC_GYM=1
+      so autonomous runs don't hang on every tool prompt; interactive
+      ``agentspec run`` keeps the default per-tool approval.
+    """
     cmd = ["claude"]
-    # In autonomous runners (gym, caloron sprint) the agent needs tool
-    # access without interactive approval prompts. AGENTSPEC_GYM=1 opts
-    # into claude's permission bypass. `agentspec run` without that env
-    # keeps the default prompt-every-tool behaviour so interactive users
-    # aren't silently granting full access.
+
     if os.environ.get("AGENTSPEC_GYM") == "1":
         cmd.append("--dangerously-skip-permissions")
+
+    model_name = _claude_model_name(plan.model)
+    if model_name:
+        cmd.extend(["--model", model_name])
+
     if plan.system_prompt:
         cmd.extend(["--system-prompt", plan.system_prompt])
+
     prompt = _derive_prompt(manifest, input_text)
     if prompt:
         cmd.extend(["-p", prompt])
     return cmd
+
+
+def _claude_model_name(model: str) -> str:
+    """Strip a ``provider/`` prefix from a model identifier for claude-code.
+
+    ``claude/claude-sonnet-4-6`` → ``claude-sonnet-4-6``
+    ``anthropic/claude-opus-4-6`` → ``claude-opus-4-6``
+    ``sonnet``                   → ``sonnet`` (alias already bare)
+    ``""`` / None                → ``""`` (caller skips the flag)
+    """
+    if not model:
+        return ""
+    if "/" in model:
+        return model.split("/", 1)[1]
+    return model
 
 
 def _build_gemini_cmd(
@@ -188,17 +220,47 @@ def _build_opencode_cmd(
 ) -> list[str]:
     """Invoke opencode non-interactively.
 
-    opencode's `--print` mode accepts a single positional prompt and emits the
-    model's response to stdout. We prepend the resolver-built system prompt so
-    opencode (which selects the model itself) still gets the agent's persona
-    and traits.
+    Per https://opencode.ai/docs/cli/ the non-interactive form is
+    ``opencode run <prompt>``. The default ``build`` agent has full
+    tool access (file write + shell) so no yolo flag is required or
+    exists for the ``run`` subcommand itself. Permission-sensitive
+    environments can scope access via the ``OPENCODE_PERMISSION`` env
+    var on the caller's side.
+
+    opencode has no dedicated ``--system-prompt`` flag, so the
+    resolver-built system prompt is prepended to the user prompt
+    with a separator blank line.
     """
-    cmd = ["opencode", "--print"]
+    cmd = ["opencode", "run"]
     prompt = _derive_prompt(manifest, input_text) or ""
     if plan.system_prompt:
         prompt = f"{plan.system_prompt}\n\n{prompt}".strip()
     if prompt:
         cmd.append(prompt)
+    return cmd
+
+
+def _build_cursor_cmd(
+    plan: ResolvedPlan, manifest: AgentManifest, input_text: str | None
+) -> list[str]:
+    """Invoke cursor-agent non-interactively.
+
+    Binary is ``cursor-agent`` (the ``cursor`` command is the desktop
+    editor). Per cursor.com/docs, headless mode is
+    ``cursor-agent -p <prompt> --output-format text``. Tool access is
+    on by default in agent mode; no yolo-style approval-bypass flag
+    is documented on the headless path.
+
+    cursor-agent has no dedicated system-prompt flag on the CLI; the
+    resolver-built system prompt is prepended to the user prompt.
+    """
+    cmd = ["cursor-agent", "--output-format", "text"]
+
+    prompt = _derive_prompt(manifest, input_text) or ""
+    if plan.system_prompt:
+        prompt = f"{plan.system_prompt}\n\n{prompt}".strip()
+    if prompt:
+        cmd.extend(["-p", prompt])
     return cmd
 
 

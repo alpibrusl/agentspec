@@ -119,7 +119,10 @@ def resolve(manifest: AgentManifest, *, verbose: bool = False) -> ResolvedPlan:
 RUNTIME_BINARIES = {
     "claude-code": "claude",
     "gemini-cli": "gemini",
-    "cursor": "cursor",
+    # cursor-cli's binary is `cursor-agent` (not `cursor`, which is the
+    # desktop editor's command). Verified against the published CLI
+    # docs and caloron-noether's field-tested FRAMEWORKS table.
+    "cursor-cli": "cursor-agent",
     "codex-cli": "codex",
     "opencode": "opencode",
     "aider": "aider",
