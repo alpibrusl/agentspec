@@ -15,7 +15,7 @@ from agentspec.gym.assertions import AssertionResult, run_assertions
 from agentspec.gym.task import Task
 from agentspec.parser.loader import agent_hash, load_agent
 from agentspec.resolver.resolver import resolve
-from agentspec.runner.runner import build_command
+from agentspec.runner.runner import build_command, build_env
 
 
 @dataclass
@@ -46,15 +46,29 @@ def _seed_worktree(workdir: Path, setup: dict) -> None:
         target.write_text(content)
 
 
-def _resolve_command(manifest, task: Task, dry_run: bool) -> tuple[list[str], str]:
-    """Resolve the agent and build its argv, or return an empty list + note."""
+def _resolve_command(
+    manifest, task: Task, dry_run: bool
+):
+    """Resolve the agent and build its argv + env.
+
+    Returns (argv, env, note). ``env`` carries any provider-specific env
+    vars the resolver's auth choice requires — crucially including the
+    Vertex-AI env vars when the resolver picked that path, so gemini-cli
+    (and claude-code, aider, opencode) actually talk to Vertex instead
+    of their direct provider APIs. Without this, a user with
+    GOOGLE_CLOUD_PROJECT + ADC set would be routed through Vertex by
+    the resolver, but the spawned CLI would fall back to direct-API
+    mode and fail because no API key is set.
+    """
     try:
         plan = resolve(manifest)
     except RuntimeError as e:
         if not dry_run:
             raise
-        return [], f"resolver: {e}"
-    return build_command(plan, manifest, task.goal), ""
+        return [], os.environ.copy(), f"resolver: {e}"
+    argv = build_command(plan, manifest, task.goal)
+    env = build_env(plan)
+    return argv, env, ""
 
 
 def run_task(
@@ -74,7 +88,7 @@ def run_task(
     temporary directory is created and removed afterwards.
     """
     manifest = load_agent(str(spec_path))
-    command, resolver_note = _resolve_command(manifest, task, dry_run)
+    command, resolved_env, resolver_note = _resolve_command(manifest, task, dry_run)
     ahash = agent_hash(manifest)
 
     owns_workdir = workdir is None
@@ -87,7 +101,10 @@ def run_task(
         _seed_worktree(workdir, task.setup)
 
         if not dry_run and command:
-            env = os.environ.copy()
+            # Start from build_env(plan) which injects Vertex-AI vars
+            # when the resolver picked that path, then layer the gym
+            # marker on top.
+            env = dict(resolved_env)
             env.setdefault("AGENTSPEC_GYM", "1")
             try:
                 proc = subprocess.run(

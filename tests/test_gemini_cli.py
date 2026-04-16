@@ -225,6 +225,143 @@ def test_resolver_falls_back_to_subscription_when_no_keys(monkeypatch):
     assert "subscription" in plan.auth_source.lower()
 
 
+# ── Vertex AI integration ──────────────────────────────────────────────────
+
+
+def test_vertex_env_for_gemini_sets_vertexai_flag():
+    """The real knob gemini-cli reads is GOOGLE_GENAI_USE_VERTEXAI=true
+    (verified by the CLI's own error message when no auth is configured).
+    Regression: if this ever drops back to GOOGLE_API_KEY or similar,
+    Vertex routing silently breaks for gemini-cli callers."""
+    from agentspec.resolver.vertex import VertexConfig, vertex_env_for_runtime
+
+    cfg = VertexConfig(project="my-proj", location="europe-west1")
+    env = vertex_env_for_runtime("gemini-cli", cfg)
+    assert env["GOOGLE_GENAI_USE_VERTEXAI"] == "true"
+    assert env["GOOGLE_CLOUD_PROJECT"] == "my-proj"
+    assert env["GOOGLE_CLOUD_LOCATION"] == "europe-west1"
+
+
+def test_build_env_injects_vertex_vars_for_gemini(monkeypatch):
+    """When the resolver reports auth via Vertex, build_env adds the
+    vars gemini-cli needs to actually talk to Vertex. Without this
+    the spawned CLI falls back to direct-API mode and fails."""
+    from agentspec.resolver.vertex import VertexConfig
+    from agentspec.runner.runner import build_env
+
+    # Force detect_vertex_ai to return a config without needing real gcloud.
+    monkeypatch.setattr(
+        "agentspec.runner.runner.detect_vertex_ai",
+        lambda: VertexConfig(project="test-proj", location="europe-west1"),
+    )
+    plan = ResolvedPlan(
+        runtime="gemini-cli",
+        model="gemini/gemini-2.5-pro",
+        auth_source="vertex-ai (project=test-proj, region=europe-west1)",
+    )
+    env = build_env(plan)
+    assert env.get("GOOGLE_GENAI_USE_VERTEXAI") == "true"
+    assert env.get("GOOGLE_CLOUD_PROJECT") == "test-proj"
+
+
+def test_build_env_skips_vertex_vars_when_direct_api(monkeypatch):
+    """auth_source not mentioning vertex → no Vertex injection, so the
+    spawned CLI uses its API-key path as expected."""
+    monkeypatch.delenv("GOOGLE_GENAI_USE_VERTEXAI", raising=False)
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    from agentspec.runner.runner import build_env
+
+    plan = ResolvedPlan(
+        runtime="gemini-cli",
+        model="gemini/gemini-2.5-pro",
+        auth_source="env.GEMINI_API_KEY",
+    )
+    env = build_env(plan)
+    assert "GOOGLE_GENAI_USE_VERTEXAI" not in env
+    # Doesn't invent a project either.
+    assert "GOOGLE_CLOUD_PROJECT" not in env
+
+
+def test_resolver_prefers_vertex_over_api_key_when_both_available(monkeypatch):
+    """If the user has both GEMINI_API_KEY AND Vertex configured, the
+    resolver prefers Vertex — single-vendor billing + audit trail are
+    the intended benefits per the vertex module docstring."""
+    from agentspec.resolver.vertex import VertexConfig
+
+    monkeypatch.setenv("GEMINI_API_KEY", "also-set")
+    monkeypatch.setattr(
+        "agentspec.resolver.vertex.detect_vertex_ai",
+        lambda: VertexConfig(project="prefer-vertex", location="europe-west1"),
+    )
+    import shutil
+
+    real_which = shutil.which
+    monkeypatch.setattr(
+        shutil, "which", lambda cmd: "/fake/gemini" if cmd == "gemini" else real_which(cmd)
+    )
+
+    manifest = _minimal_manifest()
+    plan = resolve(manifest)
+    assert "vertex" in plan.auth_source.lower(), (
+        f"expected Vertex routing, got auth_source={plan.auth_source!r}"
+    )
+    assert "prefer-vertex" in plan.auth_source
+
+
+def test_gym_runner_propagates_vertex_env_to_subprocess(monkeypatch, tmp_path: Path):
+    """The end-to-end claim: when Vertex is configured, the env the gym
+    passes to subprocess.run contains the Vertex vars. Previously gym's
+    runner did os.environ.copy() and skipped build_env(plan), so the
+    subprocess lost Vertex routing even though the resolver had
+    selected it."""
+    from agentspec.resolver.vertex import VertexConfig
+    from agentspec.gym.runner import _resolve_command
+    from agentspec.gym.task import Task
+
+    # Make resolver see Vertex.
+    # The resolver local-imports detect_vertex_ai from vertex, so patch
+    # at the source module.
+    monkeypatch.setattr(
+        "agentspec.resolver.vertex.detect_vertex_ai",
+        lambda: VertexConfig(project="test-proj", location="europe-west1"),
+    )
+    # And make build_env's call also see it.
+    monkeypatch.setattr(
+        "agentspec.runner.runner.detect_vertex_ai",
+        lambda: VertexConfig(project="test-proj", location="europe-west1"),
+    )
+    import shutil
+
+    real_which = shutil.which
+    monkeypatch.setattr(
+        shutil, "which", lambda cmd: "/fake/gemini" if cmd == "gemini" else real_which(cmd)
+    )
+
+    # Use a real .agent file so load_agent works
+    agent_path = tmp_path / "test.agent"
+    agent_path.write_text(
+        "apiVersion: agent/v1\n"
+        "name: t\n"
+        "version: 0.1.0\n"
+        "description: test\n"
+        "model:\n  preferred: [gemini/gemini-2.5-pro]\n"
+        "skills: []\n"
+        "tools:\n  mcp: []\n  native: []\n"
+    )
+    from agentspec.parser.loader import load_agent
+
+    manifest = load_agent(str(agent_path))
+    task = Task(id="t", goal="hi")
+    argv, env, note = _resolve_command(manifest, task, dry_run=False)
+
+    assert argv  # resolved to gemini
+    assert env.get("GOOGLE_GENAI_USE_VERTEXAI") == "true", (
+        "Gym subprocess env must carry the Vertex flag or gemini-cli "
+        "falls back to direct-API mode"
+    )
+    assert env.get("GOOGLE_CLOUD_PROJECT") == "test-proj"
+
+
 def test_resolver_decision_log_lists_both_keys_tried(monkeypatch):
     """When neither key is set, the decision trail should name both so
     users can see what to set instead of guessing."""
