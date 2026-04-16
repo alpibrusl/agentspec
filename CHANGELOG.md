@@ -5,6 +5,35 @@ All notable changes to AgentSpec will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.2] — 2026-04-16
+
+Post-install verification of v0.3.1: both goose (1.30.0) and codex-cli
+(0.121.0) installed rootless on a test box, and the argv agentspec
+produces was confirmed against `codex exec --help` and `goose run
+--help` from the live binaries. One small fix surfaced:
+
+### Fixed
+
+- **codex-cli subscription auth fallback.** The resolver previously
+  rejected codex-cli with "OPENAI_API_KEY not set" when no API key
+  was in the env. But codex also supports subscription-style auth
+  via `codex login` (browser OAuth or device code) — same pattern
+  as `claude login` / gemini's logged-in CLI mode. Resolver now
+  treats codex-cli the same as claude-code and gemini-cli for the
+  subscription-fallback path: if the binary is on PATH but no API
+  key is set, assume the CLI is logged in rather than skipping
+  the candidate. Users with just `codex login` and no env var are
+  no longer wrongly rejected.
+
+### Verified
+
+Live against installed binaries (v0.3.1 claims validated):
+
+  codex exec --full-auto -m gpt-5 "<prompt>"   ← what agentspec produces
+  goose run --model claude-sonnet-4-6 -t "<prompt>"  ← what agentspec produces
+
+Both match `--help` output exactly.
+
 ## [0.3.1] — 2026-04-16
 
 Extends v0.3.0's parity sweep to codex-cli (which had its own set of

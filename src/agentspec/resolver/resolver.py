@@ -221,11 +221,12 @@ def _resolve_model(
                 (k for k in env_keys if os.environ.get(k)), None
             )
             if not satisfied_key:
-                # claude-code and gemini-cli also support subscription auth:
-                # a logged-in CLI doesn't need an API key. If the runtime is
-                # one of those and its binary is present, trust it to manage
-                # its own auth.
-                if runtime_name in ("claude-code", "gemini-cli"):
+                # claude-code, gemini-cli, and codex-cli all support
+                # subscription / logged-in auth (via `claude login`,
+                # gemini's GEMINI_API_KEY-or-OAuth, `codex login`).
+                # Trust a present binary to manage its own auth when
+                # no API key is set.
+                if runtime_name in ("claude-code", "gemini-cli", "codex-cli"):
                     auth_source = f"{runtime_name} subscription"
                     tried = "/".join(env_keys)
                     decisions.append(
