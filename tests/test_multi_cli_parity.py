@@ -228,6 +228,46 @@ def test_build_opencode_handles_empty_prompt():
     assert cmd == ["opencode", "run"]
 
 
+# ── opencode Vertex AI wiring ──────────────────────────────────────────────
+
+
+def test_vertex_env_for_opencode_sets_vertex_location_not_google_cloud_location():
+    """opencode reads VERTEX_LOCATION — not GOOGLE_CLOUD_LOCATION like
+    gemini-cli does. Setting only GOOGLE_CLOUD_LOCATION means opencode
+    falls back to the ``global`` region regardless of what our resolver
+    picked; for EU-residency users (europe-west1 default) this sent
+    traffic to the wrong region silently.
+
+    Source: https://opencode.ai/docs/providers/ — the google-vertex-ai
+    provider section lists VERTEX_LOCATION as the region env var.
+    """
+    from agentspec.resolver.vertex import VertexConfig, vertex_env_for_runtime
+
+    cfg = VertexConfig(project="my-proj", location="europe-west1")
+    env = vertex_env_for_runtime("opencode", cfg)
+
+    # Project lands at GOOGLE_CLOUD_PROJECT — opencode reads this one.
+    assert env["GOOGLE_CLOUD_PROJECT"] == "my-proj"
+
+    # Region goes to VERTEX_LOCATION — the variable opencode actually reads.
+    assert env.get("VERTEX_LOCATION") == "europe-west1", (
+        "opencode ignores GOOGLE_CLOUD_LOCATION; must set VERTEX_LOCATION"
+    )
+
+
+def test_opencode_vertex_env_preserves_gemini_mappings_intact():
+    """Regression guard: the opencode fix must not have altered
+    gemini-cli's Vertex env (different tool, different env vars)."""
+    from agentspec.resolver.vertex import VertexConfig, vertex_env_for_runtime
+
+    cfg = VertexConfig(project="p", location="europe-west1")
+    gemini = vertex_env_for_runtime("gemini-cli", cfg)
+    # gemini-cli still uses GOOGLE_CLOUD_LOCATION (verified in its own
+    # test file); this is the "mappings are independent" check.
+    assert gemini.get("GOOGLE_CLOUD_LOCATION") == "europe-west1"
+    assert gemini.get("GOOGLE_GENAI_USE_VERTEXAI") == "true"
+
+
 # ── Cross-CLI parity checks ────────────────────────────────────────────────
 
 

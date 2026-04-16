@@ -125,8 +125,19 @@ def vertex_env_for_runtime(runtime: str, config: VertexConfig) -> dict[str, str]
         }
 
     if runtime == "opencode":
-        # opencode supports Vertex via the standard GCP env vars
-        return base
+        # opencode (per https://opencode.ai/docs/providers/ for
+        # google-vertex-ai) reads:
+        #   - GOOGLE_CLOUD_PROJECT (present in ``base``)
+        #   - VERTEX_LOCATION (NOT GOOGLE_CLOUD_LOCATION which ``base``
+        #     sets for everyone else — opencode specifically uses
+        #     VERTEX_LOCATION, defaulting to "global" if unset)
+        #   - GOOGLE_APPLICATION_CREDENTIALS — handled transparently
+        #     because os.environ is inherited; if the user has set
+        #     this variable, build_env passes it through unchanged
+        return {
+            **base,
+            "VERTEX_LOCATION": config.location,
+        }
 
     if runtime == "ollama":
         # Local model — no Vertex routing
