@@ -105,11 +105,67 @@ def _build_claude_cmd(
 def _build_gemini_cmd(
     plan: ResolvedPlan, manifest: AgentManifest, input_text: str | None
 ) -> list[str]:
+    """Build an argv for gemini-cli.
+
+    Covers the flags that matter for agent-like runs:
+
+    - ``-m/--model`` — extracted from ``plan.model`` (e.g. the provider
+      prefix is stripped from ``gemini/gemini-2.5-pro`` to pass
+      ``gemini-2.5-pro``).
+    - ``-y/--yolo`` — added in gym/non-interactive runs so the agent
+      doesn't hang on tool-approval prompts. Mirrors the claude-code
+      behaviour when AGENTSPEC_GYM=1.
+    - ``-p/--prompt`` — non-interactive mode with the supplied prompt.
+
+    System prompt handling: gemini-cli has no ``--system-prompt`` flag.
+    It instead reads ``GEMINI.md`` from the current working directory
+    as system instructions. ``plan.system_prompt`` is written to that
+    file when present. Callers who don't want the file persisted
+    should run gemini in a throwaway worktree (the gym does this).
+    """
     cmd = ["gemini"]
+
+    # Autonomous mode — skip interactive approval prompts.
+    if os.environ.get("AGENTSPEC_GYM") == "1":
+        cmd.append("-y")
+
+    # Model selection — strip the provider prefix so `gemini/gemini-2.5-pro`
+    # becomes `gemini-2.5-pro`. Don't pass -m if resolution produced an
+    # empty string (defensive: the resolver always sets plan.model, but
+    # some test fixtures skip it).
+    model_name = _gemini_model_name(plan.model)
+    if model_name:
+        cmd.extend(["-m", model_name])
+
+    # System prompt lands at GEMINI.md in CWD. gemini-cli picks it up
+    # automatically as system instructions. Only write when we have
+    # something to write — don't stomp an existing GEMINI.md that
+    # belongs to the user's project.
+    if plan.system_prompt:
+        import pathlib
+        gemini_md = pathlib.Path.cwd() / "GEMINI.md"
+        if not gemini_md.exists():
+            gemini_md.write_text(plan.system_prompt)
+
     prompt = _derive_prompt(manifest, input_text)
     if prompt:
-        cmd.extend(["--prompt", prompt])
+        cmd.extend(["-p", prompt])
     return cmd
+
+
+def _gemini_model_name(model: str) -> str:
+    """Strip a ``provider/`` prefix from a model identifier for gemini-cli.
+
+    ``gemini/gemini-2.5-pro`` → ``gemini-2.5-pro``
+    ``google/gemini-2.5-pro`` → ``gemini-2.5-pro``
+    ``gemini-2.5-pro``        → ``gemini-2.5-pro`` (already bare)
+    ``""`` / None             → ``""`` (caller skips the flag)
+    """
+    if not model:
+        return ""
+    if "/" in model:
+        return model.split("/", 1)[1]
+    return model
 
 
 def _build_codex_cmd(

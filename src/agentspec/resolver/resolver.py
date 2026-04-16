@@ -133,16 +133,27 @@ def _detect_runtimes() -> dict[str, bool]:
 
 # ── Model resolution ──────────────────────────────────────────────────────────
 
-# provider prefix → (preferred runtime, env key for API auth)
+# provider prefix → (preferred runtime, env keys for API auth)
 #
-# When env_key is None, the runtime manages its own auth/model selection
+# env_keys is a tuple — any one set counts as authenticated. Listed in
+# the order the runtime itself prefers (primary first); the first key
+# present in the env is reported as the auth source.
+#
+# When env_keys is None, the runtime manages its own auth/model selection
 # (e.g. opencode, aider, ollama) and just needs to be present in PATH.
-PROVIDER_MAP: dict[str, tuple[str, str | None]] = {
-    "claude": ("claude-code", "ANTHROPIC_API_KEY"),
-    "anthropic": ("claude-code", "ANTHROPIC_API_KEY"),
-    "gemini": ("gemini-cli", "GOOGLE_API_KEY"),
-    "google": ("gemini-cli", "GOOGLE_API_KEY"),
-    "openai": ("codex-cli", "OPENAI_API_KEY"),
+#
+# Gemini-cli (verified via `gemini -p` without keys set): reads
+# GEMINI_API_KEY as primary, plus Vertex AI via GOOGLE_GENAI_USE_VERTEXAI.
+# GOOGLE_API_KEY is NOT read by gemini-cli despite being the Google-branded
+# env var many tools default to — we keep it as a secondary fallback so a
+# misconfigured user gets the auth advertised, but the resolver logs which
+# key actually satisfied it.
+PROVIDER_MAP: dict[str, tuple[str, tuple[str, ...] | None]] = {
+    "claude": ("claude-code", ("ANTHROPIC_API_KEY",)),
+    "anthropic": ("claude-code", ("ANTHROPIC_API_KEY",)),
+    "gemini": ("gemini-cli", ("GEMINI_API_KEY", "GOOGLE_API_KEY")),
+    "google": ("gemini-cli", ("GEMINI_API_KEY", "GOOGLE_API_KEY")),
+    "openai": ("codex-cli", ("OPENAI_API_KEY",)),
     "local": ("ollama", None),
     "ollama": ("ollama", None),
     "opencode": ("opencode", None),
@@ -173,7 +184,7 @@ def _resolve_model(
             decisions.append(f"  skip {preferred}: unknown provider '{provider}'")
             continue
 
-        runtime_name, env_key = PROVIDER_MAP[provider]
+        runtime_name, env_keys = PROVIDER_MAP[provider]
 
         if not available.get(runtime_name):
             decisions.append(f"  skip {preferred}: {runtime_name} not in PATH")
@@ -187,23 +198,36 @@ def _resolve_model(
             )
             return preferred, runtime_name, auth_source
 
-        # Direct provider API path (original behavior)
-        if env_key and not os.environ.get(env_key):
-            # claude-code and gemini-cli also support subscription auth:
-            # a logged-in CLI doesn't need an API key. If the runtime is
-            # one of those and its binary is present, trust it to manage
-            # its own auth.
-            if runtime_name in ("claude-code", "gemini-cli"):
-                auth_source = f"{runtime_name} subscription"
+        # Direct provider API path: try each accepted env key in order,
+        # report whichever satisfied the check. Single-key providers just
+        # have one entry; gemini-cli has GEMINI_API_KEY as primary with
+        # GOOGLE_API_KEY as a fallback.
+        if env_keys:
+            satisfied_key = next(
+                (k for k in env_keys if os.environ.get(k)), None
+            )
+            if not satisfied_key:
+                # claude-code and gemini-cli also support subscription auth:
+                # a logged-in CLI doesn't need an API key. If the runtime is
+                # one of those and its binary is present, trust it to manage
+                # its own auth.
+                if runtime_name in ("claude-code", "gemini-cli"):
+                    auth_source = f"{runtime_name} subscription"
+                    tried = "/".join(env_keys)
+                    decisions.append(
+                        f"  selected {preferred} via {runtime_name} ({auth_source}; "
+                        f"none of {tried} set — assuming CLI is logged in)"
+                    )
+                    return preferred, runtime_name, auth_source
+                tried = "/".join(env_keys)
                 decisions.append(
-                    f"  selected {preferred} via {runtime_name} ({auth_source}; "
-                    f"{env_key} not set — assuming CLI is logged in)"
+                    f"  skip {preferred}: none of {tried} set "
+                    "(and Vertex AI not configured)"
                 )
-                return preferred, runtime_name, auth_source
-            decisions.append(f"  skip {preferred}: {env_key} not set (and Vertex AI not configured)")
-            continue
-
-        auth_source = f"env.{env_key}" if env_key else "local socket"
+                continue
+            auth_source = f"env.{satisfied_key}"
+        else:
+            auth_source = "local socket"
         decisions.append(f"  selected {preferred} via {runtime_name} ({auth_source})")
         return preferred, runtime_name, auth_source
 
