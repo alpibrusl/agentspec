@@ -24,12 +24,16 @@ from agentspec.parser.manifest import (
     ToolsSpec,
     TrustSpec,
 )
-from agentspec.resolver.resolver import RUNTIME_BINARIES, ResolvedPlan
+from agentspec.resolver.resolver import PROVIDER_MAP, RUNTIME_BINARIES, ResolvedPlan
 from agentspec.runner.runner import (
     _build_claude_cmd,
+    _build_codex_cmd,
     _build_cursor_cmd,
+    _build_goose_cmd,
     _build_opencode_cmd,
     _claude_model_name,
+    _codex_model_name,
+    _goose_model_name,
     build_command,
 )
 
@@ -228,6 +232,157 @@ def test_build_opencode_handles_empty_prompt():
     assert cmd == ["opencode", "run"]
 
 
+# ── codex-cli ──────────────────────────────────────────────────────────────
+
+
+def test_build_codex_uses_exec_subcommand(monkeypatch):
+    """Regression: v0.2.x built ``codex <prompt>`` which drops into the
+    interactive TUI. The non-interactive form per
+    https://developers.openai.com/codex/cli/reference is
+    ``codex exec <prompt>``."""
+    monkeypatch.delenv("AGENTSPEC_GYM", raising=False)
+    plan = ResolvedPlan(runtime="codex-cli", model="openai/o3")
+    cmd = _build_codex_cmd(plan, _minimal_manifest(), "do the thing")
+    assert cmd[0:2] == ["codex", "exec"]
+
+
+def test_build_codex_adds_full_auto_under_gym(monkeypatch):
+    """Autonomous runs must set --full-auto (workspace-write sandbox +
+    on-request approvals) or codex blocks on every tool call."""
+    monkeypatch.setenv("AGENTSPEC_GYM", "1")
+    plan = ResolvedPlan(runtime="codex-cli", model="openai/o3")
+    cmd = _build_codex_cmd(plan, _minimal_manifest(), "hi")
+    assert "--full-auto" in cmd
+
+
+def test_build_codex_omits_full_auto_outside_gym(monkeypatch):
+    """Interactive users should still see approval prompts."""
+    monkeypatch.delenv("AGENTSPEC_GYM", raising=False)
+    plan = ResolvedPlan(runtime="codex-cli", model="openai/o3")
+    cmd = _build_codex_cmd(plan, _minimal_manifest(), "hi")
+    assert "--full-auto" not in cmd
+
+
+def test_build_codex_passes_model_flag():
+    plan = ResolvedPlan(runtime="codex-cli", model="openai/gpt-5")
+    cmd = _build_codex_cmd(plan, _minimal_manifest(), "hi")
+    assert "-m" in cmd
+    assert cmd[cmd.index("-m") + 1] == "gpt-5"
+
+
+def test_build_codex_does_not_pass_instructions_flag():
+    """The old builder passed ``--instructions <tmpfile>`` but that
+    flag doesn't exist on modern codex. Must not appear in argv."""
+    plan = ResolvedPlan(
+        runtime="codex-cli",
+        model="openai/o3",
+        system_prompt="You are careful.",
+    )
+    cmd = _build_codex_cmd(plan, _minimal_manifest(), "implement it")
+    assert "--instructions" not in cmd
+
+
+def test_build_codex_prepends_system_prompt():
+    """codex has no system-prompt CLI flag; must prepend to user prompt."""
+    plan = ResolvedPlan(
+        runtime="codex-cli",
+        model="openai/o3",
+        system_prompt="You are careful.",
+    )
+    cmd = _build_codex_cmd(plan, _minimal_manifest(), "implement it")
+    # Last arg is the combined prompt
+    assert "You are careful." in cmd[-1]
+    assert "implement it" in cmd[-1]
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("openai/gpt-5", "gpt-5"),
+        ("openai/o3", "o3"),
+        ("o3", "o3"),  # alias
+        ("", ""),
+    ],
+)
+def test_codex_model_name_strips_provider_prefix(raw: str, expected: str):
+    assert _codex_model_name(raw) == expected
+
+
+# ── goose (new in v0.3.1) ──────────────────────────────────────────────────
+
+
+def test_goose_is_in_runtime_binaries():
+    """Dispatch + resolver tables must both know about goose."""
+    assert RUNTIME_BINARIES["goose"] == "goose"
+    assert "goose" in PROVIDER_MAP
+
+
+def test_build_goose_uses_run_subcommand_and_text_flag():
+    """Non-interactive form per goose-docs.ai is ``goose run -t <prompt>``."""
+    plan = ResolvedPlan(runtime="goose", model="anthropic/claude-sonnet-4-6")
+    cmd = _build_goose_cmd(plan, _minimal_manifest(), "ship a feature")
+    assert cmd[0:2] == ["goose", "run"]
+    assert "-t" in cmd
+    assert cmd[cmd.index("-t") + 1] == "ship a feature"
+
+
+def test_build_goose_passes_model_flag():
+    """goose's --model is a real flag (unlike cursor/opencode which are
+    config-driven); must be wired so the manifest's preference isn't
+    silently dropped."""
+    plan = ResolvedPlan(runtime="goose", model="anthropic/claude-sonnet-4-6")
+    cmd = _build_goose_cmd(plan, _minimal_manifest(), "hi")
+    assert "--model" in cmd
+    assert cmd[cmd.index("--model") + 1] == "claude-sonnet-4-6"
+
+
+def test_build_goose_uses_system_flag_not_prepended():
+    """Unlike codex/cursor/opencode, goose has a real ``--system <text>``
+    flag. Use it — don't mash the system prompt into the user prompt."""
+    plan = ResolvedPlan(
+        runtime="goose",
+        model="anthropic/claude-sonnet-4-6",
+        system_prompt="You are a code reviewer.",
+    )
+    cmd = _build_goose_cmd(plan, _minimal_manifest(), "review this")
+    assert "--system" in cmd
+    sys_idx = cmd.index("--system")
+    assert cmd[sys_idx + 1] == "You are a code reviewer."
+    # User prompt stays untouched — not prefixed with the system text.
+    t_idx = cmd.index("-t")
+    assert cmd[t_idx + 1] == "review this"
+
+
+def test_build_goose_skips_model_flag_when_empty():
+    """Defensive: empty plan.model → let goose use its configured default."""
+    plan = ResolvedPlan(runtime="goose", model="")
+    cmd = _build_goose_cmd(plan, _minimal_manifest(), "hi")
+    assert "--model" not in cmd
+
+
+def test_goose_dispatches_via_build_command():
+    """The meta-test: goose is reachable through build_command, not
+    just the private _build_goose_cmd. Same class of regression
+    prevention as cursor-cli had before the parity sweep."""
+    plan = ResolvedPlan(runtime="goose", model="anthropic/claude-sonnet-4-6")
+    cmd = build_command(plan, _minimal_manifest(), "go")
+    assert cmd[0] == "goose"
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("anthropic/claude-sonnet-4-6", "claude-sonnet-4-6"),
+        ("openai/gpt-5", "gpt-5"),
+        ("goose/whatever", "whatever"),
+        ("claude-sonnet-4-6", "claude-sonnet-4-6"),
+        ("", ""),
+    ],
+)
+def test_goose_model_name_strips_provider_prefix(raw: str, expected: str):
+    assert _goose_model_name(raw) == expected
+
+
 # ── opencode Vertex AI wiring ──────────────────────────────────────────────
 
 
@@ -279,6 +434,7 @@ def test_opencode_vertex_env_preserves_gemini_mappings_intact():
         ("cursor-cli", "cursor-agent"),
         ("codex-cli", "codex"),
         ("opencode", "opencode"),
+        ("goose", "goose"),
         ("aider", "aider"),
         ("ollama", "ollama"),
     ],

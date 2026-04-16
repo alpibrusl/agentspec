@@ -125,6 +125,10 @@ RUNTIME_BINARIES = {
     "cursor-cli": "cursor-agent",
     "codex-cli": "codex",
     "opencode": "opencode",
+    # Block's goose — MCP-native agent. Manages its own provider/auth
+    # config via `goose configure`; our resolver just needs the binary
+    # on PATH. Added v0.3.1.
+    "goose": "goose",
     "aider": "aider",
     "ollama": "ollama",
 }
@@ -160,6 +164,13 @@ PROVIDER_MAP: dict[str, tuple[str, tuple[str, ...] | None]] = {
     "local": ("ollama", None),
     "ollama": ("ollama", None),
     "opencode": ("opencode", None),
+    # goose picks its own provider/model from its own config + env
+    # (goose configure writes ~/.config/goose/config.yaml; any of the
+    # standard per-provider keys like ANTHROPIC_API_KEY /
+    # OPENAI_API_KEY / GOOGLE_API_KEY in the env are read by the
+    # underlying provider library). From our side, binary presence is
+    # enough to select it.
+    "goose": ("goose", None),
     "aider": ("aider", None),
 }
 

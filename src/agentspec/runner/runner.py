@@ -26,6 +26,7 @@ def build_command(plan: ResolvedPlan, manifest: AgentManifest, input_text: str |
         "cursor-cli": _build_cursor_cmd,
         "codex-cli": _build_codex_cmd,
         "opencode": _build_opencode_cmd,
+        "goose": _build_goose_cmd,
         "aider": _build_aider_cmd,
         "ollama": _build_ollama_cmd,
     }
@@ -203,16 +204,109 @@ def _gemini_model_name(model: str) -> str:
 def _build_codex_cmd(
     plan: ResolvedPlan, manifest: AgentManifest, input_text: str | None
 ) -> list[str]:
-    cmd = ["codex"]
+    """Invoke OpenAI Codex CLI non-interactively.
+
+    Verified against https://developers.openai.com/codex/cli/reference
+    (also matches caloron-noether's field-validated FRAMEWORKS table):
+
+    - ``codex exec <prompt>`` is the non-interactive subcommand. Running
+      ``codex <prompt>`` without the subcommand drops into the
+      interactive TUI.
+    - ``--full-auto`` is the recommended autonomous mode (workspace-write
+      sandbox + on-request approvals).
+    - ``-m/--model`` takes a bare model name.
+    - No ``--system-prompt`` or ``--instructions`` flag exists — codex's
+      system-prompt story is config-file-only. When an agent manifest
+      declares one, we prepend it to the user prompt with a blank-line
+      separator.
+
+    The previous builder used ``--instructions <tmpfile>`` which
+    codex rejects with "unknown option"; fixed here.
+    """
+    cmd = ["codex", "exec"]
+
+    if os.environ.get("AGENTSPEC_GYM") == "1":
+        cmd.append("--full-auto")
+
+    model_name = _codex_model_name(plan.model)
+    if model_name:
+        cmd.extend(["-m", model_name])
+
+    prompt = _derive_prompt(manifest, input_text) or ""
     if plan.system_prompt:
-        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False)
-        tmp.write(plan.system_prompt)
-        tmp.close()
-        cmd.extend(["--instructions", tmp.name])
-    prompt = _derive_prompt(manifest, input_text)
+        prompt = f"{plan.system_prompt}\n\n{prompt}".strip()
     if prompt:
         cmd.append(prompt)
     return cmd
+
+
+def _codex_model_name(model: str) -> str:
+    """Strip a ``provider/`` prefix for codex's ``-m`` flag.
+
+    ``openai/gpt-5`` → ``gpt-5``
+    ``o3``            → ``o3`` (alias already bare)
+    ``""`` / None     → ``""`` (caller skips the flag)
+    """
+    if not model:
+        return ""
+    if "/" in model:
+        return model.split("/", 1)[1]
+    return model
+
+
+def _build_goose_cmd(
+    plan: ResolvedPlan, manifest: AgentManifest, input_text: str | None
+) -> list[str]:
+    """Invoke Block's goose non-interactively.
+
+    Per https://goose-docs.ai/docs/guides/goose-cli-commands, the
+    non-interactive form is:
+
+        goose run -t "<prompt>" [--model <name>] [--system <text>]
+
+    Distinguished features vs. the other runners:
+
+    - ``--system <text>`` is a real flag (unlike codex/cursor/opencode
+      where we have to prepend the system prompt to the user prompt).
+    - ``--model <name>`` works similarly to claude/gemini; we pass the
+      bare model name after stripping any ``provider/`` prefix.
+    - Goose manages provider+API-key selection itself via its own
+      config (``goose configure``) — our resolver doesn't need to
+      inject provider-specific env vars.
+
+    Tool access: goose uses MCP by default (built-in "developer" tools
+    plus any MCP servers the user has configured). No equivalent of
+    claude's ``--dangerously-skip-permissions`` is documented for the
+    ``run`` subcommand; autonomous behaviour is the default.
+    """
+    cmd = ["goose", "run"]
+
+    model_name = _goose_model_name(plan.model)
+    if model_name:
+        cmd.extend(["--model", model_name])
+
+    if plan.system_prompt:
+        cmd.extend(["--system", plan.system_prompt])
+
+    prompt = _derive_prompt(manifest, input_text)
+    if prompt:
+        cmd.extend(["-t", prompt])
+    return cmd
+
+
+def _goose_model_name(model: str) -> str:
+    """Strip a ``provider/`` prefix for goose's ``--model`` flag.
+
+    ``anthropic/claude-sonnet-4-6`` → ``claude-sonnet-4-6``
+    ``goose/claude-sonnet-4-6``     → ``claude-sonnet-4-6``
+    ``claude-sonnet-4-6``           → ``claude-sonnet-4-6`` (already bare)
+    ``""`` / None                   → ``""`` (caller skips the flag)
+    """
+    if not model:
+        return ""
+    if "/" in model:
+        return model.split("/", 1)[1]
+    return model
 
 
 def _build_opencode_cmd(

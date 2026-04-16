@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentspec-alpibru"
-version = "0.3.0"
+version = "0.3.1"
 description = "Universal agent manifest standard with resolver, signed profiles, and Noether composition — the missing layer between agent definitions and runtimes. (Import as `agentspec`.)"
 readme = "README.md"
 license = "EUPL-1.2"

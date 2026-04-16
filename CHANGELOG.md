@@ -5,6 +5,70 @@ All notable changes to AgentSpec will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] — 2026-04-16
+
+Extends v0.3.0's parity sweep to codex-cli (which had its own set of
+broken flags) and adds support for Block's `goose`.
+
+### Added
+
+- **`goose` runtime**. MCP-native agent from Block; non-interactive
+  form per https://goose-docs.ai/docs/guides/goose-cli-commands is
+  `goose run -t "<prompt>"`. Supported flags:
+  - `--model <name>` — bare model name with provider prefix stripped
+  - `--system <text>` — **real** system-prompt flag (unlike
+    codex/cursor/opencode where we have to prepend)
+  - `-t <prompt>` — the user prompt
+  Provider/auth managed by goose itself via `goose configure`; our
+  resolver just needs the binary on PATH. Handles MCP-heavy agent
+  manifests naturally because goose's entire design is MCP-first.
+
+### Fixed
+
+- **codex-cli uses `exec` subcommand now.** Previously built
+  `codex <prompt>` which drops into the interactive TUI; modern codex
+  requires `codex exec <prompt>` for non-interactive runs. Verified
+  against https://developers.openai.com/codex/cli/reference.
+- **codex-cli autonomous mode via `--full-auto`.** Added under
+  `AGENTSPEC_GYM=1`, matching the treatment other autonomous CLIs get
+  (claude's `--dangerously-skip-permissions`, gemini's `-y`).
+- **codex-cli `-m/--model` threading.** Same gap as claude/gemini had —
+  manifest's `model.preferred` was silently dropped.
+- **codex-cli `--instructions` flag removal.** The previous builder
+  wrote `plan.system_prompt` to a temp file and passed
+  `--instructions <tmpfile>`, but codex doesn't have that flag.
+  Modern codex rejected the argv with "unknown option". System prompts
+  now prepend to the user prompt (same pattern as cursor/opencode).
+
+### Not added (deliberate — flagged in commits)
+
+- **Amazon Q Developer CLI**. The open-source `q` binary is "no longer
+  actively maintained" per its own GitHub; AWS moved to Kiro which is
+  closed-source. Speculative integration would generate exactly the
+  silent-drift bugs the parity sweeps have been fixing. Will revisit
+  if a user explicitly asks and can share the current flag contract.
+- **Sourcegraph Cody, Continue, Windsurf**. Each exists as a CLI but
+  field demand hasn't surfaced, and each has its own flag-drift
+  surface to maintain. Adding only when asked.
+
+### Tests
+
+- 139 → 161 green. 22 new: 7 codex (exec subcommand, --full-auto gating,
+  -m threading, --instructions removed, system-prompt prepended, model
+  name stripping parametrized), 6 goose (dispatch reachability, run
+  subcommand, --model, --system flag, empty-model guard, model name
+  stripping parametrized), and the parity table was extended to pin
+  goose → goose.
+
+### Upgrading from 0.3.0
+
+No breaking changes. New `goose` runtime is opt-in via
+`model.preferred: [goose/...]` or the usual provider-prefix shapes
+like `anthropic/claude-sonnet-4-6` when the claude-code runtime isn't
+available. codex-cli behaviour changes for all callers — the old
+argv was broken against modern codex anyway, so there's no
+well-formed invocation that will regress.
+
 ## [0.3.0] — 2026-04-16
 
 Runner + resolver parity sweep across all four supported coding CLIs

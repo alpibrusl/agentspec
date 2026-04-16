@@ -151,6 +151,13 @@ def vertex_env_for_runtime(runtime: str, config: VertexConfig) -> dict[str, str]
         # Cursor uses its own backend; not relevant
         return {}
 
+    if runtime == "goose":
+        # goose's provider/model selection is config-driven via
+        # `goose configure`. If the user has configured it to route
+        # through Vertex AI directly, goose handles that itself —
+        # passing GCP base env through is enough to give it the option.
+        return base
+
     # Unknown runtime — pass through base GCP env so it has the option
     return base
 
