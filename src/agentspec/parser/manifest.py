@@ -40,6 +40,49 @@ class AuthSpec(BaseModel, extra="ignore"):
 # ── Tools ──────────────────────────────────────────────────────────────────────
 
 
+class DependencySpec(BaseModel, extra="ignore"):
+    """Declares what needs to be installed for a tool or skill to work."""
+
+    pip: list[str] = []
+    npm: list[str] = []
+    cargo: list[str] = []
+    nix: list[str] = []
+    setup: list[str] = []
+    env: dict[str, str] = {}
+
+
+class McpServerSpec(BaseModel, extra="ignore"):
+    """Structured MCP server specification.
+
+    Accepted in ``tools.mcp`` alongside plain strings and legacy dicts.
+    Plain strings are expanded via the well-known server registry at
+    provision time; legacy ``{name: {config}}`` dicts are normalised
+    into this shape by the provisioner.
+    """
+
+    name: str
+    url: Optional[str] = None
+    transport: Literal["stdio", "http", "sse"] = "stdio"
+    command: Optional[str] = None
+    args: list[str] = []
+    env: dict[str, str] = {}
+    headers: dict[str, str] = {}
+    requires: DependencySpec = DependencySpec()
+
+
+class SkillSpec(BaseModel, extra="ignore"):
+    """Enriched skill with optional dependency declaration.
+
+    Skills can be plain strings (``web-search``) or dicts with a
+    ``name`` key and optional ``requires``. Plain strings are the
+    common case; enriched skills are for orchestrators that need
+    to install dependencies before running.
+    """
+
+    name: str
+    requires: DependencySpec = DependencySpec()
+
+
 class ToolsSpec(BaseModel, extra="ignore"):
     mcp: list[Union[str, dict[str, Any]]] = []
     native: list[str] = []
@@ -150,7 +193,7 @@ class AgentManifest(BaseModel, extra="ignore"):
     # Core
     model: ModelSpec = ModelSpec()
     auth: AuthSpec = AuthSpec()
-    skills: list[str] = []
+    skills: list[Union[str, dict[str, Any]]] = []
     tools: ToolsSpec = ToolsSpec()
     memory: MemorySpec = MemorySpec()
     behavior: BehaviorSpec = BehaviorSpec()

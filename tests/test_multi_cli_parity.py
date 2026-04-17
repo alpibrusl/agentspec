@@ -200,19 +200,16 @@ def test_build_cursor_passes_prompt_as_positional():
     assert cmd[-1] == "ship it"
 
 
-def test_build_cursor_prepends_system_prompt():
-    """cursor-agent has no dedicated --system-prompt on headless mode,
-    so we prepend it to the user prompt. Prompt is the last positional
-    argument (after all flags)."""
+def test_build_cursor_system_prompt_not_in_command():
+    """System prompt is now provisioned to .cursorrules by the provisioner,
+    not prepended to the CLI prompt."""
     plan = ResolvedPlan(
         runtime="cursor-cli",
         model="cursor/sonnet-4",
         system_prompt="You cite sources.",
     )
     cmd = _build_cursor_cmd(plan, _minimal_manifest(), "summarise")
-    combined = cmd[-1]
-    assert combined.startswith("You cite sources.")
-    assert "summarise" in combined
+    assert cmd[-1] == "summarise"
 
 
 def test_cursor_runtime_dispatches_via_build_command():
@@ -298,19 +295,15 @@ def test_build_opencode_prompt_is_single_positional():
     assert cmd.count("build a thing") == 1
 
 
-def test_build_opencode_prepends_system_prompt():
-    """No --system-prompt flag on `opencode run`, so we prepend. The
-    combined prompt is the last arg of the command."""
+def test_build_opencode_system_prompt_not_in_command():
+    """System prompt is now provisioned to .open-code/instructions.md
+    by the provisioner, not prepended to the CLI prompt."""
     plan = ResolvedPlan(
         runtime="opencode", model="opencode/anthropic/claude-sonnet-4-6",
         system_prompt="You are a code reviewer.",
     )
     cmd = _build_opencode_cmd(plan, _minimal_manifest(), "review this PR")
-    combined = cmd[-1]
-    assert "You are a code reviewer." in combined
-    assert "review this PR" in combined
-    # System prompt appears first with a blank line before user prompt
-    assert combined.index("You are") < combined.index("review this PR")
+    assert cmd[-1] == "review this PR"
 
 
 def test_build_opencode_handles_empty_prompt():
@@ -385,17 +378,16 @@ def test_build_codex_does_not_pass_instructions_flag():
     assert "--instructions" not in cmd
 
 
-def test_build_codex_prepends_system_prompt():
-    """codex has no system-prompt CLI flag; must prepend to user prompt."""
+def test_build_codex_system_prompt_not_in_command():
+    """System prompt is now provisioned to AGENTS.md by the provisioner,
+    not prepended to the CLI prompt."""
     plan = ResolvedPlan(
         runtime="codex-cli",
         model="openai/o3",
         system_prompt="You are careful.",
     )
     cmd = _build_codex_cmd(plan, _minimal_manifest(), "implement it")
-    # Last arg is the combined prompt
-    assert "You are careful." in cmd[-1]
-    assert "implement it" in cmd[-1]
+    assert cmd[-1] == "implement it"
 
 
 @pytest.mark.parametrize(

@@ -312,15 +312,21 @@ SKILL_MAP: dict[str, list[str]] = {
 }
 
 
+def _skill_name(entry: str | dict) -> str:
+    if isinstance(entry, str):
+        return entry
+    return entry.get("name", next(iter(entry)))
+
+
 def _resolve_skills(
-    skills: list[str], decisions: list[str]
+    skills: list[str | dict], decisions: list[str]
 ) -> tuple[list[str], list[str]]:
     resolved: list[str] = []
     missing: list[str] = []
-    for skill in skills:
+    for entry in skills:
+        skill = _skill_name(entry)
         candidates = SKILL_MAP.get(skill)
         if candidates is None:
-            # Unknown skill — pass through as-is (custom skill)
             decisions.append(f"  skill {skill}: unknown, passing through")
             resolved.append(skill)
             continue

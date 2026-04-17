@@ -2,6 +2,10 @@
 
 Translates a ResolvedPlan into the actual CLI invocation for the
 selected runtime (claude-code, gemini-cli, codex-cli, etc.).
+
+Before spawning, the provisioner writes runtime-specific config files
+(instruction files, MCP configs) so each CLI receives the agent's
+identity, rules, skill instructions, and tool registrations natively.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from pathlib import Path
 from agentspec.parser.manifest import AgentManifest
 from agentspec.resolver.resolver import ResolvedPlan
 from agentspec.resolver.vertex import detect_vertex_ai, vertex_env_for_runtime
+from agentspec.runner.provisioner import provision
 
 
 # Runtime → command builder
@@ -38,16 +43,22 @@ def build_command(plan: ResolvedPlan, manifest: AgentManifest, input_text: str |
     return builder(plan, manifest, input_text)
 
 
-def execute(plan: ResolvedPlan, manifest: AgentManifest, input_text: str | None = None) -> int:
+def execute(
+    plan: ResolvedPlan,
+    manifest: AgentManifest,
+    input_text: str | None = None,
+    workdir: Path | None = None,
+) -> int:
     """Execute the agent by spawning the resolved runtime.
 
-    If Vertex AI is configured (via GCP env vars + ADC), the relevant
-    backend env vars are injected so the spawned CLI talks to Vertex
-    instead of the direct provider API.
+    Provisions instruction files and MCP configs into *workdir* before
+    spawning. If *workdir* is None, uses the current working directory.
     """
+    workdir = workdir or Path.cwd()
+    provision(plan, manifest, workdir)
     cmd = build_command(plan, manifest, input_text)
     env = build_env(plan)
-    result = subprocess.run(cmd, env=env)
+    result = subprocess.run(cmd, env=env, cwd=workdir)
     return result.returncode
 
 
@@ -140,45 +151,17 @@ def _build_gemini_cmd(
 ) -> list[str]:
     """Build an argv for gemini-cli.
 
-    Covers the flags that matter for agent-like runs:
-
-    - ``-m/--model`` — extracted from ``plan.model`` (e.g. the provider
-      prefix is stripped from ``gemini/gemini-2.5-pro`` to pass
-      ``gemini-2.5-pro``).
-    - ``-y/--yolo`` — added in gym/non-interactive runs so the agent
-      doesn't hang on tool-approval prompts. Mirrors the claude-code
-      behaviour when AGENTSPEC_GYM=1.
-    - ``-p/--prompt`` — non-interactive mode with the supplied prompt.
-
-    System prompt handling: gemini-cli has no ``--system-prompt`` flag.
-    It instead reads ``GEMINI.md`` from the current working directory
-    as system instructions. ``plan.system_prompt`` is written to that
-    file when present. Callers who don't want the file persisted
-    should run gemini in a throwaway worktree (the gym does this).
+    System prompt and skill instructions are provisioned to GEMINI.md
+    by the provisioner before this builder runs.
     """
     cmd = ["gemini"]
 
-    # Autonomous mode — skip interactive approval prompts.
     if os.environ.get("AGENTSPEC_GYM") == "1":
         cmd.append("-y")
 
-    # Model selection — strip the provider prefix so `gemini/gemini-2.5-pro`
-    # becomes `gemini-2.5-pro`. Don't pass -m if resolution produced an
-    # empty string (defensive: the resolver always sets plan.model, but
-    # some test fixtures skip it).
     model_name = _gemini_model_name(plan.model)
     if model_name:
         cmd.extend(["-m", model_name])
-
-    # System prompt lands at GEMINI.md in CWD. gemini-cli picks it up
-    # automatically as system instructions. Only write when we have
-    # something to write — don't stomp an existing GEMINI.md that
-    # belongs to the user's project.
-    if plan.system_prompt:
-        import pathlib
-        gemini_md = pathlib.Path.cwd() / "GEMINI.md"
-        if not gemini_md.exists():
-            gemini_md.write_text(plan.system_prompt)
 
     prompt = _derive_prompt(manifest, input_text)
     if prompt:
@@ -206,22 +189,8 @@ def _build_codex_cmd(
 ) -> list[str]:
     """Invoke OpenAI Codex CLI non-interactively.
 
-    Verified against https://developers.openai.com/codex/cli/reference
-    (also matches caloron-noether's field-validated FRAMEWORKS table):
-
-    - ``codex exec <prompt>`` is the non-interactive subcommand. Running
-      ``codex <prompt>`` without the subcommand drops into the
-      interactive TUI.
-    - ``--full-auto`` is the recommended autonomous mode (workspace-write
-      sandbox + on-request approvals).
-    - ``-m/--model`` takes a bare model name.
-    - No ``--system-prompt`` or ``--instructions`` flag exists — codex's
-      system-prompt story is config-file-only. When an agent manifest
-      declares one, we prepend it to the user prompt with a blank-line
-      separator.
-
-    The previous builder used ``--instructions <tmpfile>`` which
-    codex rejects with "unknown option"; fixed here.
+    System prompt and skill instructions are provisioned to AGENTS.md
+    by the provisioner before this builder runs.
     """
     cmd = ["codex", "exec"]
 
@@ -232,9 +201,7 @@ def _build_codex_cmd(
     if model_name:
         cmd.extend(["-m", model_name])
 
-    prompt = _derive_prompt(manifest, input_text) or ""
-    if plan.system_prompt:
-        prompt = f"{plan.system_prompt}\n\n{prompt}".strip()
+    prompt = _derive_prompt(manifest, input_text)
     if prompt:
         cmd.append(prompt)
     return cmd
@@ -314,38 +281,18 @@ def _build_opencode_cmd(
 ) -> list[str]:
     """Invoke opencode non-interactively.
 
-    Non-interactive form: ``opencode run <message>``. Verified against
-    opencode 1.4.6's ``run --help`` output.
-
-    Supported flags we thread through:
-
-    - ``-m/--model <provider/model>`` — opencode wants the **full**
-      ``provider/model`` pair (unlike claude/gemini/goose which take
-      bare model names). We pass ``plan.model`` through unchanged.
-
-    No yolo flag exists on the ``run`` subcommand itself; the default
-    ``build`` agent has full tool access. Permission-sensitive
-    environments scope access via the ``OPENCODE_PERMISSION`` env var.
-
-    opencode has no dedicated ``--system-prompt`` flag, so the
-    resolver-built system prompt is prepended to the user prompt.
+    System prompt and skill instructions are provisioned to
+    .open-code/instructions.md by the provisioner before this builder runs.
     """
     cmd = ["opencode", "run"]
 
     if plan.model:
-        # Strip the caller-facing ``opencode/`` prefix so what we pass
-        # to ``-m`` is the ``provider/model`` pair opencode itself
-        # expects. Example:
-        #   manifest: opencode/anthropic/claude-sonnet-4-6
-        #   stripped: anthropic/claude-sonnet-4-6  ← what opencode wants
         opencode_model = (
             plan.model.split("/", 1)[1] if "/" in plan.model else plan.model
         )
         cmd.extend(["-m", opencode_model])
 
-    prompt = _derive_prompt(manifest, input_text) or ""
-    if plan.system_prompt:
-        prompt = f"{plan.system_prompt}\n\n{prompt}".strip()
+    prompt = _derive_prompt(manifest, input_text)
     if prompt:
         cmd.append(prompt)
     return cmd
@@ -356,22 +303,8 @@ def _build_cursor_cmd(
 ) -> list[str]:
     """Invoke cursor-agent non-interactively.
 
-    Verified against cursor-agent 2026.04.15's ``--help`` output.
-    Binary is ``cursor-agent`` (the ``cursor`` command is the desktop
-    editor).
-
-    Flag shape:
-
-    - ``-p/--print`` is a **boolean** that enables non-interactive
-      mode. Not a prompt-carrier — the prompt is a positional arg.
-    - ``--model <name>`` accepts cursor-specific names like ``gpt-5``,
-      ``sonnet-4``, ``sonnet-4-thinking``.
-    - ``--force`` / ``--yolo`` (aliases) auto-approves all tool calls.
-      Added under AGENTSPEC_GYM=1 so autonomous runs don't block.
-    - ``--output-format text|json|stream-json`` controls stdout shape.
-
-    No dedicated system-prompt flag; system prompt prepended to the
-    user prompt with a blank-line separator.
+    System prompt and skill instructions are provisioned to .cursorrules
+    by the provisioner before this builder runs.
     """
     cmd = ["cursor-agent", "-p", "--output-format", "text"]
 
@@ -382,9 +315,7 @@ def _build_cursor_cmd(
     if model_name:
         cmd.extend(["--model", model_name])
 
-    prompt = _derive_prompt(manifest, input_text) or ""
-    if plan.system_prompt:
-        prompt = f"{plan.system_prompt}\n\n{prompt}".strip()
+    prompt = _derive_prompt(manifest, input_text)
     if prompt:
         cmd.append(prompt)
     return cmd

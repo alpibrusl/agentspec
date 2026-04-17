@@ -1,59 +1,55 @@
 """Ed25519 signing for agent memories and portfolio entries.
 
-The supervisor signs validated memories, making agent portfolios
-trustworthy and verifiable. Anyone with the supervisor's public key
-can verify that a memory/achievement was actually validated.
+The supervisor signs validated memories, making agent portfolios verifiable.
+Anyone with the supervisor's public key can check that a memory, portfolio
+entry, or skill proof was actually signed by the holder of the matching
+private key.
 
-Uses the stdlib-compatible PyNaCl (or falls back to hashlib HMAC
-if PyNaCl is not available).
+PyNaCl is a hard dependency (declared in pyproject.toml). There is no
+fallback: historical HMAC code masqueraded as signing while silently
+rubber-stamping any signature-shaped string, so it has been removed
+entirely. Run under a dev mode that explicitly refuses to produce
+``SignedEnvelope`` if you need an unsigned flow.
 """
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
-from typing import Any
+
+from nacl.encoding import HexEncoder
+from nacl.exceptions import BadSignatureError
+from nacl.signing import SigningKey, VerifyKey
 
 from agentspec.profile.models import (
-    AgentProfile,
     Memory,
-    MemoryStatus,
     PortfolioEntry,
     SignedEnvelope,
     SkillProof,
 )
 
-# Try to use real Ed25519 (PyNaCl), fall back to HMAC
-try:
-    from nacl.signing import SigningKey, VerifyKey
-    from nacl.encoding import HexEncoder
-    NACL_AVAILABLE = True
-except ImportError:
-    NACL_AVAILABLE = False
+ALGORITHM = "ed25519"
 
 
 def generate_keypair() -> tuple[str, str]:
-    """Generate an Ed25519 keypair. Returns (private_hex, public_hex).
+    """Generate an Ed25519 keypair. Returns ``(private_hex, public_hex)``."""
+    sk = SigningKey.generate()
+    private_hex = sk.encode(encoder=HexEncoder).decode()
+    public_hex = sk.verify_key.encode(encoder=HexEncoder).decode()
+    return private_hex, public_hex
 
-    If PyNaCl is not available, generates a random HMAC key pair
-    (less secure but functional for development).
+
+def public_key_for(private_key_hex: str) -> str:
+    """Derive the Ed25519 public key (hex) from a private key (hex).
+
+    This is the only correct way to recover a pubkey from a privkey.
+    Previous ProfileManager code used ``sha256(private_key)`` which is
+    a fingerprint of the secret, not a verifying key.
     """
-    if NACL_AVAILABLE:
-        sk = SigningKey.generate()
-        private_hex = sk.encode(encoder=HexEncoder).decode()
-        public_hex = sk.verify_key.encode(encoder=HexEncoder).decode()
-        return private_hex, public_hex
-
-    # Fallback: HMAC-based (not real Ed25519, but deterministic)
-    import os
-    secret = os.urandom(32).hex()
-    public = hashlib.sha256(bytes.fromhex(secret)).hexdigest()
-    return secret, public
+    sk = SigningKey(bytes.fromhex(private_key_hex))
+    return sk.verify_key.encode(encoder=HexEncoder).decode()
 
 
 def _memory_payload(memory: Memory) -> bytes:
-    """Canonical bytes representation of a memory for signing."""
     data = {
         "id": memory.id,
         "content": memory.content,
@@ -66,7 +62,6 @@ def _memory_payload(memory: Memory) -> bytes:
 
 
 def _portfolio_payload(entry: PortfolioEntry) -> bytes:
-    """Canonical bytes representation of a portfolio entry for signing."""
     data = {
         "project": entry.project,
         "sprint_id": entry.sprint_id,
@@ -89,65 +84,75 @@ def _skill_payload(proof: SkillProof) -> bytes:
     return json.dumps(data, sort_keys=True).encode()
 
 
+def _sign(payload: bytes, private_key_hex: str) -> tuple[str, str]:
+    """Sign *payload* with the given private key. Returns ``(signature_hex, pubkey_hex)``."""
+    sk = SigningKey(bytes.fromhex(private_key_hex))
+    signed = sk.sign(payload, encoder=HexEncoder)
+    signature = signed.signature
+    sig_hex = signature.decode() if isinstance(signature, bytes) else signature
+    pubkey_hex = sk.verify_key.encode(encoder=HexEncoder).decode()
+    return sig_hex, pubkey_hex
+
+
 def sign_memory(memory: Memory, private_key: str) -> SignedEnvelope:
     """Sign a memory with the supervisor's private key."""
-    payload = _memory_payload(memory)
-
-    if NACL_AVAILABLE:
-        sk = SigningKey(bytes.fromhex(private_key))
-        signed = sk.sign(payload, encoder=HexEncoder)
-        sig_hex = signed.signature.decode() if isinstance(signed.signature, bytes) else signed.signature
-        pubkey = sk.verify_key.encode(encoder=HexEncoder).decode()
-    else:
-        sig_hex = hmac.new(bytes.fromhex(private_key), payload, hashlib.sha256).hexdigest()
-        pubkey = hashlib.sha256(bytes.fromhex(private_key)).hexdigest()
-
+    sig_hex, pubkey_hex = _sign(_memory_payload(memory), private_key)
     return SignedEnvelope(
         memory_id=memory.id,
-        signer=pubkey,
-        algorithm="ed25519" if NACL_AVAILABLE else "hmac-sha256",
+        signer=pubkey_hex,
+        algorithm=ALGORITHM,
         signature=sig_hex,
     )
 
 
 def verify_memory(memory: Memory, envelope: SignedEnvelope) -> bool:
-    """Verify a signed memory against the supervisor's public key."""
-    payload = _memory_payload(memory)
+    """Verify a signed memory against the envelope's declared public key.
 
-    if NACL_AVAILABLE and envelope.algorithm == "ed25519":
-        try:
-            vk = VerifyKey(bytes.fromhex(envelope.signer))
-            vk.verify(payload, bytes.fromhex(envelope.signature))
-            return True
-        except Exception:
-            return False
+    Returns ``False`` for any of: wrong algorithm, malformed hex, bad
+    signature, mismatched payload.
+    """
+    if envelope.algorithm != ALGORITHM:
+        return False
 
-    if envelope.algorithm == "hmac-sha256":
-        # Can't verify HMAC without the private key — only structural check
-        return len(envelope.signature) == 64
-
-    return False
+    try:
+        vk = VerifyKey(bytes.fromhex(envelope.signer))
+        vk.verify(_memory_payload(memory), bytes.fromhex(envelope.signature))
+    except (BadSignatureError, ValueError):
+        return False
+    return True
 
 
 def sign_portfolio_entry(entry: PortfolioEntry, private_key: str) -> str:
-    """Sign a portfolio entry. Returns hex signature."""
-    payload = _portfolio_payload(entry)
+    """Sign a portfolio entry. Returns the hex signature."""
+    sig_hex, _ = _sign(_portfolio_payload(entry), private_key)
+    return sig_hex
 
-    if NACL_AVAILABLE:
-        sk = SigningKey(bytes.fromhex(private_key))
-        signed = sk.sign(payload, encoder=HexEncoder)
-        return signed.signature.decode() if isinstance(signed.signature, bytes) else signed.signature
 
-    return hmac.new(bytes.fromhex(private_key), payload, hashlib.sha256).hexdigest()
+def verify_portfolio_entry(
+    entry: PortfolioEntry, signature_hex: str, public_key_hex: str
+) -> bool:
+    """Verify a portfolio entry signature against a known public key."""
+    try:
+        vk = VerifyKey(bytes.fromhex(public_key_hex))
+        vk.verify(_portfolio_payload(entry), bytes.fromhex(signature_hex))
+    except (BadSignatureError, ValueError):
+        return False
+    return True
 
 
 def sign_skill_proof(proof: SkillProof, private_key: str) -> str:
-    """Sign a skill proof. Returns hex signature."""
-    payload = _skill_payload(proof)
+    """Sign a skill proof. Returns the hex signature."""
+    sig_hex, _ = _sign(_skill_payload(proof), private_key)
+    return sig_hex
 
-    if NACL_AVAILABLE:
-        sk = SigningKey(bytes.fromhex(private_key))
-        signed = sk.sign(payload, encoder=HexEncoder)
-        return signed.signature.decode() if isinstance(signed.signature, bytes) else signed.signature
 
-    return hmac.new(bytes.fromhex(private_key), payload, hashlib.sha256).hexdigest()
+def verify_skill_proof(
+    proof: SkillProof, signature_hex: str, public_key_hex: str
+) -> bool:
+    """Verify a skill proof signature against a known public key."""
+    try:
+        vk = VerifyKey(bytes.fromhex(public_key_hex))
+        vk.verify(_skill_payload(proof), bytes.fromhex(signature_hex))
+    except (BadSignatureError, ValueError):
+        return False
+    return True

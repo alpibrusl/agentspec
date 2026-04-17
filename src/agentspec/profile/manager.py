@@ -25,6 +25,7 @@ from agentspec.profile.models import (
 )
 from agentspec.profile.signing import (
     generate_keypair,
+    public_key_for,
     sign_memory,
     sign_portfolio_entry,
     sign_skill_proof,
@@ -38,11 +39,13 @@ class ProfileManager:
         self.profiles_dir = Path(profiles_dir)
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
 
-        # Supervisor keypair for signing
+        # Supervisor keypair for signing.
+        # A passed-in private key must yield the same Ed25519 public key the
+        # rest of the system expects; never substitute sha256(private_key),
+        # which is a secret fingerprint, not a verifying key.
         if supervisor_private_key:
             self.private_key = supervisor_private_key
-            from hashlib import sha256
-            self.public_key = sha256(bytes.fromhex(supervisor_private_key)).hexdigest()
+            self.public_key = public_key_for(supervisor_private_key)
         else:
             self.private_key, self.public_key = generate_keypair()
 
@@ -67,8 +70,10 @@ class ProfileManager:
         )
 
         # ── Cold start: seed from manifest ─────────────────────────
-        # Add declared skills as baseline proofs (low confidence — not yet demonstrated)
-        for skill in manifest.skills:
+        # Add declared skills as baseline proofs (low confidence — not yet demonstrated).
+        # Skills may be plain strings or dicts (v0.4.0+); extract the name either way.
+        for entry in manifest.skills:
+            skill = entry if isinstance(entry, str) else entry.get("name", next(iter(entry)))
             profile.add_skill_proof(SkillProof(
                 skill=skill,
                 level="declared",
