@@ -1,0 +1,64 @@
+name: Fresh-machine quickstart
+
+# Walks the README Install + Quick Start sections on a clean
+# ubuntu-latest runner. Catches drift between docs and code: missing
+# deps, broken schema, stale examples.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # weekly
+  pull_request:
+    paths:
+      - 'README.md'
+      - 'examples/**'
+      - 'pyproject.toml'
+      - '.github/workflows/quickstart.yml'
+  workflow_dispatch:
+
+jobs:
+  install-and-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install from local path (README "Install" step + dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,signing,registry]"
+
+      - name: Full pytest suite
+        run: pytest tests/ -q
+
+      - name: Validate each bundled example manifest (schema check)
+        run: |
+          # `agentspec resolve` requires runtime binaries (claude, gemini,
+          # aider, …) that a bare ubuntu-latest does not have, and would
+          # fail with PRECONDITION_FAILED even on a well-formed manifest.
+          # `agentspec validate` checks schema conformance without needing
+          # any of those — that's the right level for a fresh-machine guard.
+          failed=0
+          for example in examples/*.agent; do
+            [ -f "$example" ] || continue
+            echo "::group::$example"
+            if ! agentspec validate "$example"; then
+              echo "::error::agentspec validate failed for $example"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$failed"
+
+      - name: Import-time smoke test
+        run: |
+          python -c "
+          import agentspec
+          from agentspec.profile.signing import generate_keypair, sign_memory, verify_memory
+          priv, pub = generate_keypair()
+          assert len(priv) == 64 and len(pub) == 64
+          print('agentspec', agentspec.__version__, 'imports cleanly; keypair generation works')
+          "
