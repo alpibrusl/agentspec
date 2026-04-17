@@ -95,11 +95,8 @@ class TestOpencodeProvider:
     def test_opencode_cmd_uses_run_subcommand_with_positional_prompt(self):
         """Verify the runner builds `opencode run "{prompt}"`.
 
-        Updated from the original ``opencode --print`` assertion after
-        cross-checking the real CLI: opencode's non-interactive form
-        per https://opencode.ai/docs/cli/ is the ``run`` subcommand,
-        not ``--print``. Also matches caloron-noether's field-validated
-        FRAMEWORKS table entry for opencode.
+        System prompt is now provisioned to .open-code/instructions.md
+        by the provisioner — the command builder only carries the user prompt.
         """
         m = AgentManifest(
             name="x",
@@ -113,10 +110,7 @@ class TestOpencodeProvider:
         )
         cmd = _build_opencode_cmd(plan, m, "hello world")
         assert cmd[0:2] == ["opencode", "run"]
-        # Prompt is the last positional (-m <model> may sit between run
-        # and the prompt now that v0.3.3 passes model through).
-        assert "You are an x." in cmd[-1]
-        assert "hello world" in cmd[-1]
+        assert cmd[-1] == "hello world"
 
 
 # ── Issue 2: claude-code without --input ──────────────────────────────────────

@@ -5,6 +5,119 @@ All notable changes to AgentSpec will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — 2026-04-17
+
+The provisioner: agentspec now materialises the agent's identity, rules,
+skill instructions, and MCP server registrations into the config files
+each CLI natively reads — before spawning the process. Previously,
+agentspec declared *what* an agent needed but left the caller (e.g.
+caloron-noether) to wire it up per-runtime. Now agentspec owns the
+full path from manifest to running CLI.
+
+### Added
+
+- **`DependencySpec` model** — declares what a tool or skill needs
+  installed: `pip`, `npm`, `cargo`, `nix` packages, `setup` commands,
+  and required `env` vars. Used by `McpServerSpec.requires` and
+  `SkillSpec.requires`.
+
+- **`McpServerSpec` model** in `agentspec.parser.manifest`. Structured
+  MCP server definition with `name`, `url`, `transport` (stdio/http/sse),
+  `command`, `args`, `env`, `headers`, `requires`. Accepted alongside
+  plain strings and legacy dicts in `tools.mcp`.
+
+- **`SkillSpec` model** — enriched skill with optional `requires`.
+  Skills can remain plain strings or become dicts with dependency
+  declarations. Plain strings are the common case; enriched skills
+  are for orchestrators that need to install deps before running.
+
+- **`agentspec.runner.provisioner` module** — the core addition.
+  `provision(plan, manifest, workdir)` writes runtime-specific config
+  files before the CLI spawns:
+
+  **Instruction files** (soul + rules + traits + skill instructions):
+  | Runtime    | File                        |
+  |------------|-----------------------------|
+  | claude-code | `CLAUDE.md`                |
+  | gemini-cli  | `GEMINI.md`                |
+  | cursor-cli  | `.cursorrules`             |
+  | codex-cli   | `AGENTS.md`                |
+  | opencode    | `.open-code/instructions.md`|
+  | aider       | `.aider.conf.yml`          |
+  | goose       | *(uses --system flag)*     |
+
+  **MCP config files** (server registrations):
+  | Runtime    | File                        |
+  |------------|-----------------------------|
+  | claude-code | `.mcp.json`                |
+  | cursor-cli  | `.cursor/mcp.json`         |
+  | gemini-cli  | `.gemini/settings.json`    |
+  | codex-cli   | `codex.json`               |
+  | opencode    | `.open-code/mcp.json`      |
+
+- **Well-known MCP server registry** — 13 servers (github, postgres,
+  slack, filesystem, brave-search, google-scholar, arxiv, jira,
+  playwright, puppeteer, noether, and aliases). Plain string entries
+  like `- github` in `tools.mcp` are auto-expanded to their full
+  server spec at provision time.
+
+- **`SKILL_INSTRUCTIONS` dictionary** — 19 skill-specific instruction
+  strings (web-search, code-execution, git, github, python-development,
+  rust-development, typescript-development, pytest-testing, etc.).
+  Injected as `## Skill Instructions` sections in each instruction file.
+
+- **`provision_install()` function** — optional second step that
+  registers MCP servers via CLI commands (`claude mcp add`,
+  `gemini mcp add`, `codex mcp add`, `cursor --add-mcp`) and
+  installs declared dependencies (pip, npm, cargo, setup commands).
+  Returns a list of human-readable notes about what was done.
+
+- **`WELL_KNOWN_SKILL_DEPS` registry** — 9 skills with default
+  dependency declarations (data-analysis → pandas/numpy,
+  pytest-testing → pytest/pytest-cov, browser → playwright, etc.).
+
+- **Folder scaffolding** — `provision()` creates the directory
+  structure each CLI expects before writing config files:
+  `.claude/`, `.cursor/`, `.gemini/`, `.open-code/`.
+
+- **`provision()` and `provision_install()` exported** from the
+  `agentspec` namespace.
+
+### Changed
+
+- **Runner calls provisioner before `build_command()`.** `execute()`
+  now accepts an optional `workdir` parameter and runs
+  `provision(plan, manifest, workdir)` before spawning the CLI.
+
+- **System prompt delivery simplified.** Command builders for codex-cli,
+  cursor-cli, opencode, and gemini-cli no longer prepend `plan.system_prompt`
+  to the user prompt or write framework-specific files directly. The
+  provisioner handles it via native instruction files. Claude-code
+  (`--system-prompt`) and goose (`--system`) still pass it as a flag.
+
+- **GEMINI.md write moved from `_build_gemini_cmd` to provisioner.**
+
+### Tests
+
+- 170 → 247 green (77 new provisioner tests covering instruction files,
+  MCP configs, well-known server expansion, normalisation, no-overwrite
+  guards, end-to-end provisioning, parametric runtime coverage, folder
+  scaffolding, DependencySpec, enriched skills, and provision_install).
+
+### Migration from 0.3.x
+
+- **No breaking changes to the manifest format.** Existing `tools.mcp`
+  entries (strings and dicts) continue to work unchanged.
+- **Skills can now be dicts.** `skills: [{name: "x", requires: {pip: [y]}}]`
+  is accepted alongside plain strings. The resolver extracts the name
+  for skill resolution; the provisioner uses `requires` for installation.
+- **Behavioral change:** CLIs that previously received system prompts
+  prepended to the user prompt now receive them via native instruction
+  files. The user prompt is cleaner; the system instructions are in the
+  file the CLI is designed to read.
+- **New dependency for aider config:** `pyyaml` (already a transitive
+  dep via pydantic, but now used directly for `.aider.conf.yml` writing).
+
 ## [0.3.3] — 2026-04-16
 
 Continued the post-install audit: installed cursor-agent 2026.04.15,

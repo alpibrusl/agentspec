@@ -121,42 +121,37 @@ def test_build_gemini_omits_yolo_outside_gym(monkeypatch):
     assert "-y" not in cmd
 
 
-def test_build_gemini_writes_system_prompt_to_gemini_md(
-    monkeypatch, tmp_path: Path
-):
-    """gemini-cli has no --system-prompt flag; it reads GEMINI.md from
-    the CWD as system instructions. Runner must create that file."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("AGENTSPEC_GYM", raising=False)
-    _build_gemini_cmd(
-        _plan(system_prompt="You are a careful code reviewer."),
-        _minimal_manifest(),
-        "review",
+def test_provisioner_writes_gemini_md(tmp_path: Path):
+    """gemini-cli reads GEMINI.md as system instructions. The provisioner
+    must create it from the agent's persona/traits/soul."""
+    from agentspec.runner.provisioner import provision
+
+    manifest = _minimal_manifest(
+        behavior=BehaviorSpec(persona="careful code reviewer"),
     )
+    provision(_plan(), manifest, tmp_path)
     assert (tmp_path / "GEMINI.md").exists()
     assert "careful code reviewer" in (tmp_path / "GEMINI.md").read_text()
 
 
-def test_build_gemini_does_not_overwrite_existing_gemini_md(
-    monkeypatch, tmp_path: Path
-):
-    """Don't stomp a GEMINI.md the user's project already has — that
-    would silently lose their own system instructions."""
-    monkeypatch.chdir(tmp_path)
+def test_provisioner_does_not_overwrite_existing_gemini_md(tmp_path: Path):
+    """Don't stomp a GEMINI.md the user's project already has."""
+    from agentspec.runner.provisioner import provision
+
     existing = "# Project's own instructions — do not touch"
     (tmp_path / "GEMINI.md").write_text(existing)
-    _build_gemini_cmd(
-        _plan(system_prompt="Agentspec wants to say this instead."),
-        _minimal_manifest(),
-        "hi",
+    manifest = _minimal_manifest(
+        behavior=BehaviorSpec(persona="agentspec persona"),
     )
+    provision(_plan(), manifest, tmp_path)
     assert (tmp_path / "GEMINI.md").read_text() == existing
 
 
-def test_build_gemini_skips_system_prompt_when_empty(monkeypatch, tmp_path: Path):
-    """No system prompt → no GEMINI.md created. Avoid spurious writes."""
-    monkeypatch.chdir(tmp_path)
-    _build_gemini_cmd(_plan(system_prompt=""), _minimal_manifest(), "hi")
+def test_provisioner_skips_gemini_md_when_no_content(tmp_path: Path):
+    """No persona, no soul, no traits → no GEMINI.md created."""
+    from agentspec.runner.provisioner import provision
+
+    provision(_plan(), _minimal_manifest(), tmp_path)
     assert not (tmp_path / "GEMINI.md").exists()
 
 
