@@ -1,5 +1,5 @@
 site_name: AgentSpec
-site_description: Universal agent manifest standard with resolver, signed profiles, and Noether composition
+site_description: Trust-restricting inheritance and runtime resolver for AI agent manifests. Multi-runtime, with an optional signing/profile layer.
 site_author: Alfonso Sastre
 site_url: https://agentspec.alpibru.com/
 repo_url: https://github.com/alpibrusl/agentspec
@@ -59,15 +59,16 @@ nav:
       - Your First Agent: getting-started/first-agent.md
   - Concepts:
       - The .agent Format: concepts/format.md
-      - Resolver: concepts/resolver.md
       - Inheritance & Trust: concepts/inheritance.md
-      - Profiles & Signing: concepts/profiles.md
-      - Noether Integration: concepts/noether.md
+      - Resolver: concepts/resolver.md
   - Guides:
       - Base Templates: guides/bases.md
       - Multi-Runtime: guides/multi-runtime.md
       - Vertex AI Backend: guides/vertex-ai.md
       - Registry: guides/registry.md
+  - Extensions:
+      - Profiles & Signing: concepts/profiles.md
+      - Noether Integration: concepts/noether.md
       - Cold Start: guides/cold-start.md
       - Sprint Integration: guides/sprints.md
   - CLI Reference:
