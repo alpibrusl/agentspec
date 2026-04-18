@@ -5,6 +5,50 @@ All notable changes to AgentSpec will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Multi-tenant registry auth.** Set
+  `AGENTSPEC_API_KEYS="alice:k1,bob:k2"` to give each publisher an
+  isolated view of the registry. The portion before the first colon is
+  the tenant ID; the remainder is the API key. Each tenant has its own
+  `{base}/tenants/{tenant}/agents/` directory; cross-tenant reads,
+  deletes, and lists surface as `404`. Mirrors the model used in
+  noether-cloud's registry so agentspec can federate with it. Tenant
+  IDs are restricted to `[A-Za-z0-9_-]+` to prevent path traversal.
+
+- **Anonymous public reads preserved.** `GET /v1/agents` and
+  `GET /v1/agents/{ref}` without an `X-API-Key` still return the
+  aggregated catalog across all tenants. An authenticated read is
+  scoped to the caller's tenant. This keeps "Docker Hub"-style public
+  pulls working while letting authenticated clients enforce isolation.
+
+- **20 new tests** in `tests/test_registry_multitenant.py` covering
+  `_parse_keys` parsing, tenant-ID validation, push/delete/get/list
+  isolation, legacy-key fallback, and storage-layer scoping.
+
+### Changed
+
+- **Legacy `AGENTSPEC_API_KEY` now maps to tenant `default`.** Existing
+  single-key deployments keep working unchanged. When both
+  `AGENTSPEC_API_KEYS` and `AGENTSPEC_API_KEY` are set, the
+  multi-tenant mapping wins — the legacy key stops being accepted.
+
+- **Storage layout** moved from `{base}/agents/` to
+  `{base}/tenants/{tenant}/agents/`. Existing installs should move
+  `{base}/agents/*.json` → `{base}/tenants/default/agents/*.json` and
+  likewise for `index.json`. The registry is alpha; auto-migration is
+  not provided.
+
+- **`push_agent` / `delete_agent` responses** now include the caller's
+  `tenant` field. Additive — existing consumers that ignore unknown
+  fields are unaffected.
+
+- **`RegistryStorage()`** now reads `AGENTSPEC_REGISTRY_DIR` at
+  construction time (was: at module import). Tests that monkeypatch
+  the env per-function now get proper isolation.
+
 ## [0.4.0] — 2026-04-17
 
 The provisioner: agentspec now materialises the agent's identity, rules,

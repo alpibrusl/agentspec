@@ -36,10 +36,10 @@ your .agent file
 claude-code / gemini-cli / codex-cli / aider / opencode / ollama
 ```
 
-### Supporting features (not the pitch)
+### Extensions (optional, not the pitch)
 
 - **Agent profiles.** Persist what an agent has done across sprints. Ed25519-signed so tampering is detectable. Signing proves *who signed* the bytes — not that the claimed work actually happened. Currently alpha; don't deploy without reading [SECURITY.md](./SECURITY.md).
-- **Registry.** FastAPI push/pull for agent manifests. Also alpha — read SECURITY.md before exposing.
+- **Gym.** Test harness for running agents against task fixtures and corpora.
 - **Noether composition.** Optional integration for pipelines built on [Noether](https://github.com/alpibrusl/noether).
 
 ---
@@ -55,8 +55,6 @@ claude-code / gemini-cli / codex-cli / aider / opencode / ollama
 | Content-addressable hashing | ✓ | partial |
 | Multi-runtime (6 frameworks) | ✓ | usually 1 |
 | ACLI-compliant CLI for agent discovery | ✓ | ✗ |
-| Signed portfolios (alpha) | ✓ | ✗ |
-| Noether composition integration | ✓ | ✗ |
 
 ---
 
@@ -188,7 +186,7 @@ $ agentspec resolve researcher.agent
 
 ## Agent Profiles & Signed Portfolios
 
-**The killer feature.** Every agent gets a persistent profile that accumulates across sprints — a verifiable CV signed by the supervisor.
+**Extension (alpha).** Persistent signed agent identity that accumulates across sprints. Useful if you want agents that carry history, but not required for the basic manifest → resolve → run path. Don't deploy without reading [SECURITY.md](./SECURITY.md).
 
 ```python
 from agentspec.profile import ProfileManager
@@ -233,46 +231,46 @@ agentspec --help              # structured help
 
 ## CLI Commands
 
+**Core:**
+
 | Command | Description |
 |---------|-------------|
-| `run` | Resolve and execute an agent |
+| `init` | Scaffold a new `.agent` project |
 | `validate` | Validate a `.agent` file against the schema |
 | `resolve` | Show what would run without executing |
+| `run` | Resolve and execute an agent |
 | `extend` | Scaffold a child agent extending an existing one |
-| `push` | Publish an agent to a registry (local or Noether) |
+| `push` | Publish an agent to a registry |
 | `pull` | Fetch an agent from a registry |
-| `search` | Semantic search for agents in a registry |
+
+**Extras:**
+
+| Command | Description |
+|---------|-------------|
+| `search` | Semantic search for agents in a remote registry |
 | `schema` | Print the JSON Schema for `.agent` files |
-| `init` | Scaffold a new `.agent` project |
+| `gym run` | Run an agent against task fixtures / corpora |
+| `introspect` | ACLI command tree as JSON (for agent discovery) |
 
 ---
 
 ## Noether Integration
 
-AgentSpec operations are registered as [Noether](https://github.com/alpibrusl/noether) stages — content-addressed, type-safe, composable:
-
-```bash
-noether stage search "agentspec"
-
-# Returns 9 stages:
-#   agentspec_validate    27980442
-#   agentspec_resolve     2a6da6ec
-#   agentspec_hash        99640059
-#   agentspec_merge       284128cf
-#   agentspec_evolve      002cebee
-#   agentspec_schema      7ea3d017
-#   agentspec_profile_create  89146f8f
-#   agentspec_profile_retro   23b7f0f1
-#   agentspec_profile_export  795d38b0
-```
-
-Compose AgentSpec operations with the 370+ other Noether stages (data, AI, web, infra) and serve them as HTTP APIs via `noether serve`.
+**Extension (optional).** AgentSpec operations are registered as [Noether](https://github.com/alpibrusl/noether) stages (validate, resolve, hash, merge, profile_*, etc.) so they can compose with other stages and be served as HTTP APIs via `noether serve`. Not required for the core workflow — see the Noether docs if you want the pipeline story.
 
 ---
 
 ## Registry
 
-Push and pull agents from any [Noether-compatible](https://github.com/alpibrusl/noether-cloud) registry:
+Push and pull agents from any [Noether-compatible](https://github.com/alpibrusl/noether-cloud) registry. **Alpha** — read [SECURITY.md](./SECURITY.md) before exposing publicly.
+
+**Multi-tenant auth** (recommended for anything shared):
+
+```bash
+export AGENTSPEC_API_KEYS="alice:alice-secret,bob:bob-secret"
+```
+
+Each tenant gets isolated storage — `alice` cannot pull, list, or delete `bob`'s manifests. Anonymous reads still see the aggregated public catalog across all tenants. For legacy single-key setups, `AGENTSPEC_API_KEY=secret` still works and maps to the tenant `default`.
 
 ```bash
 # Self-hosted (docker compose up in noether-cloud)
@@ -284,7 +282,7 @@ agentspec search "researcher" --registry https://registry.agentspec.dev
 agentspec pull <id> --registry https://registry.agentspec.dev
 ```
 
-Agents are stored with their signed profiles — when you pull, you get the agent **with its accumulated experience**.
+If the agent has a signed profile, it's stored alongside the manifest — so pulling can optionally bring the accumulated history too.
 
 ---
 
@@ -317,12 +315,13 @@ behavior:
 
 ```
 src/agentspec/
-  parser/          Pydantic models, .agent loader, content-addressable hashing
-  resolver/        Environment negotiation, inheritance, merge engine
-  runner/          Spawns the resolved runtime
-  profile/         Persistent identity, memories, portfolio, Ed25519 signing
-  registry/        HTTP client for Noether-compatible registries
-  cli/             ACLI-compliant CLI (Typer + acli-spec)
+  parser/          Pydantic models, .agent loader, content-addressable hashing   [core]
+  resolver/        Environment negotiation, inheritance, merge engine            [core]
+  runner/          Spawns the resolved runtime                                   [core]
+  registry/        HTTP client + FastAPI server for manifest push/pull           [core]
+  cli/             ACLI-compliant CLI (Typer + acli-spec)                        [core]
+  profile/         Persistent identity, memories, portfolio, Ed25519 signing    [extension]
+  gym/             Test harness for agents against task fixtures / corpora      [extension]
 ```
 
 ---

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "agentspec-alpibru"
 version = "0.4.1"
-description = "Universal agent manifest standard with resolver, signed profiles, and Noether composition — the missing layer between agent definitions and runtimes. (Import as `agentspec`.)"
+description = "Trust-restricting inheritance and runtime resolver for AI agent manifests. Multi-runtime: Claude, Gemini, Codex, Ollama, and more. (Import as `agentspec`.)"
 readme = "README.md"
 license = "EUPL-1.2"
 license-files = ["LICENSE"]
@@ -15,7 +15,7 @@ maintainers = [{ name = "Alpibru", email = "hello@alpibru.com" }]
 keywords = [
     "agent", "ai-agent", "agent-manifest", "agent-resolver",
     "llm", "mcp", "orchestration", "claude", "gemini", "ollama",
-    "noether", "agentspec",
+    "agentspec",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

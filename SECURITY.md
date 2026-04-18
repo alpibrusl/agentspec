@@ -51,17 +51,29 @@ against.
 ### Registry server (`agentspec.registry.server`)
 
 - `POST /v1/agents` and `DELETE /v1/agents/{ref}` require the `X-API-Key`
-  header, validated against `AGENTSPEC_API_KEY` using
-  `secrets.compare_digest`. 401 on mismatch, 503 when the server-side
-  key is unset (so a misconfigured server cannot silently accept
-  unauthenticated writes).
-- For local-only dev work, `AGENTSPEC_ALLOW_UNAUTHENTICATED=1` skips the
-  check and logs a warning. Do not set this in production.
+  header, validated with `secrets.compare_digest`. 401 on mismatch, 503
+  when no keys are configured at all (so a misconfigured server cannot
+  silently accept unauthenticated writes).
+- **Multi-tenant auth** (recommended): set
+  `AGENTSPEC_API_KEYS="alice:k1,bob:k2"`. The portion before the first
+  colon is the tenant ID; the remainder is the API key. Each tenant is
+  isolated at the storage layer — `alice` cannot pull, list, or delete
+  `bob`'s manifests when authenticated. Cross-tenant access surfaces as
+  `404`, not `403`, so callers cannot probe for the existence of other
+  tenants' manifests.
+- **Legacy single-tenant auth**: set `AGENTSPEC_API_KEY="secret"`. The
+  key is mapped to the tenant name `default`. When both env vars are
+  set, `AGENTSPEC_API_KEYS` wins — the legacy key stops working.
+- For local-only dev work, `AGENTSPEC_ALLOW_UNAUTHENTICATED=1` skips
+  the check and writes land in the `default` tenant. Do not set this in
+  production.
 - Read routes (`GET /healthz`, `GET /v1/agents`, `GET /v1/agents/{ref}`)
-  are public.
-- The server does no authorization beyond the shared-secret check — any
-  holder of `AGENTSPEC_API_KEY` can push or delete any manifest. Run a
-  dedicated key per publisher if you need per-actor isolation.
+  stay public: anonymous callers see the aggregated catalog across all
+  tenants (backwards-compatible). An authenticated read is scoped to
+  the caller's tenant.
+- Tenant IDs in `AGENTSPEC_API_KEYS` control storage directory names
+  (`{base}/tenants/{tenant}/`). Avoid path-traversal characters
+  (`/`, `..`) in tenant IDs.
 
 ### Registry client (`agentspec.registry.client`)
 
