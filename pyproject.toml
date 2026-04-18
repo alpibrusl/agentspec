@@ -55,6 +55,7 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.4",
     "mypy>=1.10",
+    "httpx>=0.27",
 ]
 signing = [
     # Kept for backwards-compatible `pip install "agentspec-alpibru[signing]"`
