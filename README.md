@@ -17,7 +17,7 @@ your .agent file
 claude-code / gemini-cli / codex-cli / aider / opencode / ollama
 ```
 
-Plus persistent **agent profiles** with cryptographically signed portfolios — every agent accumulates a verifiable CV across sprints.
+Plus persistent **agent profiles** with Ed25519-signed portfolios — signing proves who signed a portfolio entry and that the bytes have not been tampered with. It does not prove the agent actually accomplished what the entry describes. PyNaCl is a hard dep; there is no HMAC fallback.
 
 ---
 
@@ -47,11 +47,10 @@ What makes AgentSpec unique:
 pip install agentspec-alpibru
 ```
 
-Optional extras:
+PyNaCl ships as a core dep — signing works out of the box. Optional extras:
 
 ```bash
 pip install "agentspec-alpibru[registry]"     # FastAPI registry server
-pip install "agentspec-alpibru[signing]"      # Ed25519 via PyNaCl (recommended)
 
 # (The package is published as agentspec-alpibru on PyPI.
 #  In code, you still import it as `agentspec`.)
@@ -312,7 +311,9 @@ src/agentspec/
 ## Testing
 
 ```bash
-pytest tests/         # 45 tests across parser, merger, resolver, profile
+pytest tests/         # 271 tests — parser, merger, resolver, provisioner,
+                      # profile, signing (Ed25519 round-trip/tamper/wrong-key),
+                      # registry auth, runner, multi-CLI parity
 ```
 
 ---

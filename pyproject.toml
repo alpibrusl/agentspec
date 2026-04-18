@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentspec-alpibru"
-version = "0.4.0"
+version = "0.4.1"
 description = "Universal agent manifest standard with resolver, signed profiles, and Noether composition — the missing layer between agent definitions and runtimes. (Import as `agentspec`.)"
 readme = "README.md"
 license = "EUPL-1.2"
@@ -36,6 +36,10 @@ dependencies = [
     "pyyaml>=6.0",
     "acli-spec>=0.4.0",
     "typer>=0.9",
+    # PyNaCl is the only signing backend — see agentspec/profile/signing.py.
+    # The HMAC fallback was removed in 0.4.1 because it silently rubber-stamped
+    # any 64-char-hex signature; PyNaCl is no longer optional.
+    "PyNaCl>=1.5",
 ]
 
 [project.urls]
@@ -53,7 +57,8 @@ dev = [
     "mypy>=1.10",
 ]
 signing = [
-    "PyNaCl>=1.5",
+    # Kept for backwards-compatible `pip install "agentspec-alpibru[signing]"`
+    # one-liners that existed before PyNaCl became a core dep. No-op extra.
 ]
 registry = [
     "fastapi>=0.115",
