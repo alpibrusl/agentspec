@@ -262,7 +262,15 @@ agentspec --help              # structured help
 
 ## Registry
 
-Push and pull agents from any [Noether-compatible](https://github.com/alpibrusl/noether-cloud) registry. **Alpha** — read [SECURITY.md](./SECURITY.md) before exposing publicly (auth is a shared API key; there's no per-actor isolation yet).
+Push and pull agents from any [Noether-compatible](https://github.com/alpibrusl/noether-cloud) registry. **Alpha** — read [SECURITY.md](./SECURITY.md) before exposing publicly.
+
+**Multi-tenant auth** (recommended for anything shared):
+
+```bash
+export AGENTSPEC_API_KEYS="alice:alice-secret,bob:bob-secret"
+```
+
+Each tenant gets isolated storage — `alice` cannot pull, list, or delete `bob`'s manifests. Anonymous reads still see the aggregated public catalog across all tenants. For legacy single-key setups, `AGENTSPEC_API_KEY=secret` still works and maps to the tenant `default`.
 
 ```bash
 # Self-hosted (docker compose up in noether-cloud)
