@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Execution records.** Every `agentspec run` now writes a tamper-evident
+  log to `{workdir}/.agentspec/records/<run-id>.json` capturing manifest
+  hash, runtime, timing, exit code, and outcome. Never captures prompt
+  content, outputs, or secrets. Opt-out with `emit_record=False` on
+  `runner.execute()`. See `docs/proposals/001-execution-records.md` for
+  design and the open questions still gating v0.5's scope. Records are
+  identified by ULID (26-char Crockford base32, sortable, no PII).
+
+- **Optional Ed25519 signing for records.** `RecordManager.write(record,
+  private_key=hex)` wraps the record in the same envelope shape as signed
+  profile memories (`payload` + `algorithm` + `signature` + `public_key`).
+  Verification via `RecordManager.verify(run_id, pubkey)`. Unsigned records
+  are plain JSON — still evidence, just not attested.
+
+- **`agentspec records` CLI subcommand.** Three actions:
+  `records list` (newest-first, filter by `--agent` hash),
+  `records show <run-id>` (detail view),
+  `records verify <run-id> --pubkey <hex>` (exits non-zero on invalid —
+  suitable for CI gating). All support `--output json` for machine
+  consumers.
+
+- **34 new tests** across `tests/test_records.py` (unit: ULID,
+  schema, round-trip, signing, tamper detection, listing),
+  `tests/test_runner_records.py` (runner emission integration),
+  and `tests/test_cli_records.py` (CLI invocation coverage).
+
 - **Multi-tenant registry auth.** Set
   `AGENTSPEC_API_KEYS="alice:k1,bob:k2"` to give each publisher an
   isolated view of the registry. The portion before the first colon is

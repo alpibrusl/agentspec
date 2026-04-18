@@ -14,9 +14,14 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 
+from agentspec.parser.loader import agent_hash
 from agentspec.parser.manifest import AgentManifest
+from agentspec.records.manager import RecordManager, new_run_id
+from agentspec.records.models import ExecutionRecord
 from agentspec.resolver.resolver import ResolvedPlan
 from agentspec.resolver.vertex import detect_vertex_ai, vertex_env_for_runtime
 from agentspec.runner.provisioner import provision
@@ -48,18 +53,76 @@ def execute(
     manifest: AgentManifest,
     input_text: str | None = None,
     workdir: Path | None = None,
+    *,
+    emit_record: bool = True,
 ) -> int:
     """Execute the agent by spawning the resolved runtime.
 
     Provisions instruction files and MCP configs into *workdir* before
-    spawning. If *workdir* is None, uses the current working directory.
+    spawning. When *emit_record* is True (the default), writes a signed
+    or unsigned execution record under
+    ``{workdir}/.agentspec/records/<run-id>.json`` describing what ran.
     """
     workdir = workdir or Path.cwd()
     provision(plan, manifest, workdir)
     cmd = build_command(plan, manifest, input_text)
     env = build_env(plan)
+
+    run_id = new_run_id()
+    started_at = _utc_now_iso()
+    start_monotonic = time.monotonic()
+
     result = subprocess.run(cmd, env=env, cwd=workdir)
+
+    if emit_record:
+        _write_record(
+            plan=plan,
+            manifest=manifest,
+            workdir=workdir,
+            run_id=run_id,
+            started_at=started_at,
+            duration_s=time.monotonic() - start_monotonic,
+            exit_code=result.returncode,
+        )
+
     return result.returncode
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _write_record(
+    *,
+    plan: ResolvedPlan,
+    manifest: AgentManifest,
+    workdir: Path,
+    run_id: str,
+    started_at: str,
+    duration_s: float,
+    exit_code: int,
+) -> None:
+    """Build an ExecutionRecord from the run and persist it.
+
+    Outcome is coarse-grained: ``success`` iff exit_code == 0, else
+    ``failure``. Signal-based terminations (aborted/timeout) would need
+    caller-side knowledge the runner does not currently have; they can
+    be added when the CLI grows ``--timeout``.
+    """
+    outcome = "success" if exit_code == 0 else "failure"
+    record = ExecutionRecord(
+        run_id=run_id,
+        manifest_hash=agent_hash(manifest),
+        started_at=started_at,
+        ended_at=_utc_now_iso(),
+        duration_s=round(duration_s, 3),
+        runtime=plan.runtime,
+        model=plan.model or None,
+        exit_code=exit_code,
+        outcome=outcome,
+        warnings=list(plan.warnings or []),
+    )
+    RecordManager(workdir).write(record)
 
 
 def build_env(plan: ResolvedPlan) -> dict[str, str]:

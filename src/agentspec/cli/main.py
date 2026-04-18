@@ -764,6 +764,111 @@ def gym_run(
         raise SystemExit(1)
 
 
+# ── records ───────────────────────────────────────────────────────────────────
+
+records_app = typer.Typer(help="Inspect and verify execution records written by agentspec run")
+app.add_typer(records_app, name="records")
+
+
+@records_app.command("list")
+def records_list(
+    manifest_hash: str = typer.Option(
+        "", "--agent", help="Filter by manifest hash (ag1:…). type:string"
+    ),
+    workdir: str = typer.Option(
+        ".", "--workdir", "-C", help="Workspace root. type:path"
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.text, "--output", help="Output format. type:enum[text|json|table]"
+    ),
+) -> None:
+    """List execution records under ``{workdir}/.agentspec/records/`` newest first."""
+    from agentspec.records.manager import RecordManager
+
+    start = time.time()
+    mgr = RecordManager(workdir)
+    records = mgr.list(manifest_hash=manifest_hash or None)
+
+    data = {
+        "count": len(records),
+        "records": [r.model_dump(by_alias=True, exclude_none=True) for r in records],
+    }
+    if output == OutputFormat.json:
+        emit(success_envelope("records.list", data, version="0.1.0", start_time=start), output)
+        return
+
+    if not records:
+        sys.stdout.write("No records.\n")
+        return
+    for r in records:
+        mark = "ok" if r.outcome == "success" else r.outcome
+        sys.stdout.write(
+            f"  {r.run_id}  {r.started_at}  {r.runtime:<12}  exit={r.exit_code}  [{mark}]\n"
+        )
+
+
+@records_app.command("show")
+def records_show(
+    run_id: str = typer.Argument(help="Run ID (ULID). type:string"),
+    workdir: str = typer.Option(
+        ".", "--workdir", "-C", help="Workspace root. type:path"
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.text, "--output", help="Output format. type:enum[text|json|table]"
+    ),
+) -> None:
+    """Print a single execution record in detail."""
+    from agentspec.records.manager import RecordManager
+
+    start = time.time()
+    mgr = RecordManager(workdir)
+    try:
+        record = mgr.load(run_id)
+    except FileNotFoundError as exc:
+        raise NotFoundError(str(exc), hint="Try: agentspec records list") from exc
+
+    data = record.model_dump(by_alias=True, exclude_none=True)
+    if output == OutputFormat.json:
+        emit(success_envelope("records.show", data, version="0.1.0", start_time=start), output)
+        return
+
+    for k, v in data.items():
+        sys.stdout.write(f"  {k:<16} {v}\n")
+
+
+@records_app.command("verify")
+def records_verify(
+    run_id: str = typer.Argument(help="Run ID (ULID). type:string"),
+    pubkey: str = typer.Option(
+        ..., "--pubkey", help="Ed25519 public key (hex). type:string"
+    ),
+    workdir: str = typer.Option(
+        ".", "--workdir", "-C", help="Workspace root. type:path"
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.text, "--output", help="Output format. type:enum[text|json|table]"
+    ),
+) -> None:
+    """Verify a signed execution record against a public key.
+
+    Exits non-zero when verification fails — so CI scripts can gate on it.
+    """
+    from agentspec.records.manager import RecordManager
+
+    start = time.time()
+    mgr = RecordManager(workdir)
+    valid = mgr.verify(run_id, pubkey)
+
+    data = {"run_id": run_id, "valid": valid}
+    if output == OutputFormat.json:
+        emit(success_envelope("records.verify", data, version="0.1.0", start_time=start), output)
+    else:
+        sys.stdout.write(f"{'OK' if valid else 'INVALID'}  {run_id}\n")
+
+    if not valid:
+        raise SystemExit(1)
+
+
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 
 
