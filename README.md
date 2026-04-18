@@ -1,42 +1,61 @@
 # AgentSpec
 
-**Universal agent manifest standard with resolver, signed profiles, and Noether composition.**
+**Trust-restricting inheritance for agent manifests. A resolver turns them into a runnable CLI invocation.**
 
 [![License](https://img.shields.io/badge/License-EUPL--1.2-blue.svg)](https://eupl.eu/)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org)
-[![Tests](https://img.shields.io/badge/tests-45%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-278%20passing-brightgreen.svg)](tests/)
 
-AgentSpec is the missing layer between agent definitions and runtimes:
+Existing agent formats (gitagent, Agent Format, OSSA, Open Agent Spec) are static config files. AgentSpec is two things neither of them does:
+
+1. **A trust model.** Agent manifests inherit from other manifests, and a child can only *narrow* the parent's trust — never widen it. The merger enforces the invariant across three dimensions (filesystem, network, exec) at parse time, so no downstream code path can accidentally elevate a child past its parent's permissions.
+2. **A resolver.** Given a manifest and the state of your machine (CLIs installed, API keys in env, models available), it picks the concrete runtime + flags that will actually run. If the environment is short of what the manifest needs, it tells you what's missing instead of failing mid-execution.
+
+```yaml
+# parent.agent
+trust:
+  filesystem: readwrite
+  network: allow
+  exec: allow
+
+# child.agent
+inherits: parent
+trust:
+  filesystem: readonly     # narrowed — OK
+  network: deny            # narrowed — OK
+  exec: allow              # inherited
+```
+
+After merge, the child has `{readonly, deny, allow}`. If it had tried to widen any dimension (e.g. `filesystem: readwrite` in the child), the merger rejects the manifest at load time.
 
 ```
 your .agent file
       ↓
-  AgentSpec resolver        ← auto-negotiates environment (the moat)
-  (model, tools, runtime, auth)
+  resolver + trust-restricting merger    ← the defensible bits
       ↓
 claude-code / gemini-cli / codex-cli / aider / opencode / ollama
 ```
 
-Plus persistent **agent profiles** with Ed25519-signed portfolios — signing proves who signed a portfolio entry and that the bytes have not been tampered with. It does not prove the agent actually accomplished what the entry describes. PyNaCl is a hard dep; there is no HMAC fallback.
+### Supporting features (not the pitch)
+
+- **Agent profiles.** Persist what an agent has done across sprints. Ed25519-signed so tampering is detectable. Signing proves *who signed* the bytes — not that the claimed work actually happened. Currently alpha; don't deploy without reading [SECURITY.md](./SECURITY.md).
+- **Registry.** FastAPI push/pull for agent manifests. Also alpha — read SECURITY.md before exposing.
+- **Noether composition.** Optional integration for pipelines built on [Noether](https://github.com/alpibrusl/noether).
 
 ---
 
 ## Why AgentSpec
 
-Every existing agent format (gitagent, Agent Format, OSSA, Open Agent Spec) is a static config file. None of them resolve. AgentSpec asks:
-
-> "I have this agent definition. Figure out what's installed, what API keys I have, pick the best runtime, warn me about what's missing, accumulate what the agent learns, and just run it."
-
-What makes AgentSpec unique:
+> "I have this agent definition. Don't let a child widen trust beyond its parent. Figure out what CLI is installed, what API keys I have, pick the best runtime, warn me about what's missing, and just run it."
 
 | Feature | AgentSpec | Others |
 |---|---|---|
-| Resolver (auto-negotiate runtime) | ✓ | ✗ |
-| Inheritance with trust-restrict invariant | ✓ | ✗ |
-| Signed agent profiles + portfolios | ✓ | ✗ |
+| **Trust-restricting inheritance** (merger enforces invariant) | ✓ | ✗ |
+| **Resolver** (auto-negotiate runtime) | ✓ | ✗ |
 | Content-addressable hashing | ✓ | partial |
 | Multi-runtime (6 frameworks) | ✓ | usually 1 |
 | ACLI-compliant CLI for agent discovery | ✓ | ✗ |
+| Signed portfolios (alpha) | ✓ | ✗ |
 | Noether composition integration | ✓ | ✗ |
 
 ---
@@ -346,3 +365,11 @@ This is part of a larger ecosystem:
 - [noether-cloud](https://github.com/alpibrusl/noether-cloud) — registry + enterprise infra
 - [caloron-noether](https://github.com/alpibrusl/caloron-noether) — autonomous sprint orchestrator (uses AgentSpec for agent definitions)
 - [acli](https://github.com/alpibrusl/acli) — agent-friendly CLI standard
+
+---
+
+## Project status
+
+**One active maintainer, best-effort response times.** Core (parser + resolver + trust-restricting merger) is stable and tested. Profile signing is stable since 0.4.1. The registry, portfolio profiles, and Noether integration are **alpha** — see [SECURITY.md](./SECURITY.md) before deploying. Not suitable for deployments requiring vendor SLAs.
+
+The package currently ships as `agentspec-alpibru` on PyPI. The `-alpibru` suffix is historical; a rename (with a deprecated alias) is on the roadmap.
