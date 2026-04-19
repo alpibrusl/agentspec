@@ -183,3 +183,166 @@ def test_run_without_lock_still_resolves(cli_runner, fake_runtime, agent_file):
     result = cli_runner.invoke(cli.app.typer_app, ["run", str(agent_file)])
     assert result.exit_code == 0
     assert fake_runtime[0][0] == "claude"
+
+
+# ── PR #18 review — ship-blocker regressions ──────────────────────────────────
+
+
+def test_lock_sign_key_env_produces_signed_envelope(
+    cli_runner, fake_runtime, agent_file, tmp_path, monkeypatch
+):
+    """The CLI must be able to produce signed locks without dropping to
+    the Python API. PR #18 review called the Python-only path a
+    usability gap."""
+    from agentspec.profile.signing import generate_keypair
+
+    priv, pub = generate_keypair()
+    monkeypatch.setenv("AGENTSPEC_LOCK_SIGNING_KEY", priv)
+
+    out = tmp_path / "signed.lock"
+    result = cli_runner.invoke(
+        cli.app.typer_app,
+        [
+            "lock",
+            str(agent_file),
+            "--out",
+            str(out),
+            "--sign-key-env",
+            "AGENTSPEC_LOCK_SIGNING_KEY",
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+
+    envelope = json.loads(out.read_text())
+    assert envelope["algorithm"] == "ed25519"
+    assert envelope["public_key"] == pub
+    assert len(envelope["signature"]) == 128
+
+
+def test_run_lock_require_signed_rejects_unsigned_lock(
+    cli_runner, fake_runtime, agent_file, tmp_path
+):
+    """`--require-signed` turns a missing signature into a hard error —
+    you can't get a lock through the gate without at minimum declaring
+    it's signed. PR #18 review ship-blocker regression."""
+    from agentspec.lock.manager import LockManager
+    from agentspec.parser.loader import load_agent
+    from agentspec.profile.signing import generate_keypair
+
+    lock = LockManager.create(
+        load_agent(agent_file), cli.resolve(load_agent(agent_file))
+    )
+    lock_path = tmp_path / "unsigned.lock"
+    LockManager.write(lock, lock_path)  # unsigned
+
+    _, pub = generate_keypair()
+    result = cli_runner.invoke(
+        cli.app.typer_app,
+        [
+            "run",
+            str(agent_file),
+            "--lock",
+            str(lock_path),
+            "--require-signed",
+            "--pubkey",
+            pub,
+        ],
+    )
+    assert result.exit_code != 0
+    assert fake_runtime == []  # never spawned
+
+
+def test_run_lock_require_signed_rejects_tampered_signed_lock(
+    cli_runner, fake_runtime, agent_file, tmp_path
+):
+    """The core ship-blocker fix: a signed lock whose `resolved` fields
+    have been swapped (but `manifest.hash` untouched) must not run. The
+    pre-fix `run --lock` happily used the tampered plan because it only
+    checked manifest-hash drift on the user side, never signature."""
+    from agentspec.lock.manager import LockManager
+    from agentspec.parser.loader import load_agent
+    from agentspec.profile.signing import generate_keypair
+
+    priv, pub = generate_keypair()
+    lock = LockManager.create(
+        load_agent(agent_file), cli.resolve(load_agent(agent_file))
+    )
+    lock_path = tmp_path / "signed.lock"
+    LockManager.write(lock, lock_path, private_key=priv)
+
+    # Swap the model inside the signed payload and rewrite the file.
+    data = json.loads(lock_path.read_text())
+    data["payload"]["resolved"]["model"] = "attacker/rogue-model"
+    lock_path.write_text(json.dumps(data))
+
+    result = cli_runner.invoke(
+        cli.app.typer_app,
+        [
+            "run",
+            str(agent_file),
+            "--lock",
+            str(lock_path),
+            "--require-signed",
+            "--pubkey",
+            pub,
+        ],
+    )
+    assert result.exit_code != 0
+    assert fake_runtime == []
+
+
+def test_run_lock_require_signed_accepts_valid_signature(
+    cli_runner, fake_runtime, agent_file, tmp_path
+):
+    """Happy path: signed lock + matching pubkey → runs."""
+    from agentspec.lock.manager import LockManager
+    from agentspec.parser.loader import load_agent
+    from agentspec.profile.signing import generate_keypair
+
+    priv, pub = generate_keypair()
+    lock = LockManager.create(
+        load_agent(agent_file), cli.resolve(load_agent(agent_file))
+    )
+    lock_path = tmp_path / "signed.lock"
+    LockManager.write(lock, lock_path, private_key=priv)
+
+    result = cli_runner.invoke(
+        cli.app.typer_app,
+        [
+            "run",
+            str(agent_file),
+            "--lock",
+            str(lock_path),
+            "--require-signed",
+            "--pubkey",
+            pub,
+        ],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert fake_runtime[0][0] == "claude"
+
+
+def test_verify_lock_malformed_pubkey_is_precondition_error(
+    cli_runner, fake_runtime, agent_file, tmp_path
+):
+    """Bad hex in --pubkey is operator error, not a tampering signal.
+    Conflating the two was a PR #18 review nit — distinct error now."""
+    from agentspec.lock.manager import LockManager
+    from agentspec.parser.loader import load_agent
+    from agentspec.profile.signing import generate_keypair
+
+    priv, _ = generate_keypair()
+    lock = LockManager.create(
+        load_agent(agent_file), cli.resolve(load_agent(agent_file))
+    )
+    lock_path = tmp_path / "x.lock"
+    LockManager.write(lock, lock_path, private_key=priv)
+
+    result = cli_runner.invoke(
+        cli.app.typer_app,
+        ["verify-lock", str(lock_path), "--pubkey", "not-hex-at-all"],
+    )
+    assert result.exit_code != 0
+    # Message should not say "INVALID" alone — that conflates with real
+    # signature failures.
+    assert "INVALID" not in result.stdout or "pubkey" in result.stdout.lower()

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import platform
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError
@@ -27,6 +28,8 @@ from agentspec.lock.models import LockedHost, LockedManifest, LockedResolved, Lo
 from agentspec.parser.loader import agent_hash
 from agentspec.parser.manifest import AgentManifest
 from agentspec.resolver.resolver import ResolvedPlan
+
+log = logging.getLogger(__name__)
 
 ALGORITHM = "ed25519"
 
@@ -48,8 +51,15 @@ def _agentspec_version() -> str:
         return "unknown"
 
 
-def _system_prompt_hash(prompt: str | None) -> str:
-    return "sha256:" + hashlib.sha256((prompt or "").encode()).hexdigest()
+def _system_prompt_hash(prompt: str) -> str:
+    """Hash a system prompt for drift detection.
+
+    ``prompt`` must be a string; ``None`` is rejected (``AttributeError``
+    from ``.encode()``) rather than silently coerced to ``""``. PR #18
+    review: the well-known ``sha256("")`` would have let a drift-check
+    falsely accept any future run with a missing prompt.
+    """
+    return "sha256:" + hashlib.sha256(prompt.encode()).hexdigest()
 
 
 def _canonical(lock: LockFile) -> bytes:
@@ -79,7 +89,7 @@ class LockManager:
                 model=plan.model or "",
                 tools=list(plan.tools or []),
                 auth_source=plan.auth_source,
-                system_prompt_hash=_system_prompt_hash(plan.system_prompt),
+                system_prompt_hash=_system_prompt_hash(plan.system_prompt or ""),
             ),
             host=LockedHost(
                 os=_host_string(),
@@ -119,7 +129,13 @@ class LockManager:
     def verify(path: str | Path, public_key_hex: str) -> bool:
         """Ed25519-verify a signed lock. False for missing files,
         unsigned locks, mismatched algorithm, bad signatures, or
-        tampered payloads."""
+        tampered payloads.
+
+        Model-validation failures on the payload are logged at WARNING
+        so future debugging has a breadcrumb — PR #18 review noted the
+        previous ``except Exception: pass`` silently accepted misshapen
+        locks as "unverified" which also tells you nothing about why.
+        """
         p = Path(path)
         if not p.exists():
             return False
@@ -128,7 +144,12 @@ class LockManager:
             return False
         try:
             lock = LockFile.model_validate(data["payload"])
-        except Exception:
+        except Exception as exc:
+            log.warning(
+                "Lock verification failed during payload validation at %s: %s",
+                p,
+                exc,
+            )
             return False
         canonical = _canonical(lock)
         try:

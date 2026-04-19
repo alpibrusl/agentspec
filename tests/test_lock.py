@@ -222,3 +222,34 @@ def test_plan_from_lock_empties_system_prompt_to_avoid_drift():
     lf = LockManager.create(_manifest(), _plan(system_prompt=prompt))
     plan = plan_from_lock(lf)
     assert plan.system_prompt == ""
+
+
+# ── PR #18 review regressions ─────────────────────────────────────────────────
+
+
+def test_system_prompt_hash_rejects_none():
+    """PR #18 review: hashing None silently produced the well-known
+    sha256 of the empty string, which future drift-detection would
+    falsely accept as 'matching'. None must raise."""
+    from agentspec.lock.manager import _system_prompt_hash
+
+    with pytest.raises((AttributeError, TypeError)):
+        _system_prompt_hash(None)  # type: ignore[arg-type]
+
+
+def test_lockfile_schema_excludes_schema_only_fields():
+    """PR #18 review: ``runtime_version`` and ``mcp_servers`` were
+    declared on LockedResolved but never populated — every emitted lock
+    showed ``mcp_servers: []`` which a reader would misread as 'no MCP
+    servers configured'. Until we can populate them meaningfully,
+    they're dropped from the schema."""
+    lf = LockManager.create(_manifest(), _plan())
+    data = lf.model_dump(by_alias=True, exclude_none=True)
+    resolved = data["resolved"]
+    assert "runtime_version" not in resolved, (
+        "runtime_version leaked as schema-only field — either populate "
+        "from the plan or drop from the model"
+    )
+    assert "mcp_servers" not in resolved, (
+        "mcp_servers leaked as schema-only field — either populate or drop"
+    )
