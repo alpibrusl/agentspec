@@ -190,7 +190,7 @@ def _write_record(
     started_at: str,
     duration_s: float,
     exit_code: int,
-    warnings: list[str] | None = None,
+    warnings: list[str],
 ) -> None:
     """Build an ExecutionRecord from the run and persist it.
 
@@ -198,17 +198,8 @@ def _write_record(
     ``failure``. Signal-based terminations (aborted/timeout) would need
     caller-side knowledge the runner does not currently have; they can
     be added when the CLI grows ``--timeout``.
-
-    ``warnings`` carries run-local warnings (e.g. from the isolation
-    backend selector) that should be recorded even if they were never
-    mutated onto the shared ``plan.warnings``. Falls back to
-    ``plan.warnings`` when None so programmatic callers of
-    ``_write_record`` stay source-compatible.
     """
     outcome = "success" if exit_code == 0 else "failure"
-    effective_warnings = (
-        list(warnings) if warnings is not None else list(plan.warnings or [])
-    )
     record = ExecutionRecord(
         run_id=run_id,
         manifest_hash=agent_hash(manifest),
@@ -219,7 +210,7 @@ def _write_record(
         model=plan.model or None,
         exit_code=exit_code,
         outcome=outcome,
-        warnings=effective_warnings,
+        warnings=list(warnings),
     )
     RecordManager(workdir).write(record)
 

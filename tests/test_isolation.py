@@ -118,7 +118,30 @@ def test_policy_fs_none_only_workdir_is_writable(tmp_path):
     p = policy_from_trust(TrustSpec(filesystem="none"), workdir=tmp_path)
     assert (tmp_path, tmp_path) in p.rw_binds
     assert len(p.rw_binds) == 1
-    assert p.ro_binds == []
+    # ro_binds carries system paths (/usr, /bin, /etc, …) so the runtime
+    # CLI can exec inside the sandbox — surfaced by PR #17 smoke run.
+    # Don't pin the exact set (host-dependent), just confirm non-empty
+    # plus the load-bearing /usr entry.
+    assert len(p.ro_binds) > 0
+    assert any(host == Path("/usr") for host, _ in p.ro_binds)
+
+
+def test_policy_bounded_fs_includes_system_ro_binds(tmp_path):
+    """Every non-``full`` mode must bind system paths RO or the runtime
+    can't find its own binary. Regression for the smoke-run gap."""
+    for mode in ("none", "read-only", "scoped"):
+        p = policy_from_trust(TrustSpec(filesystem=mode), workdir=tmp_path)  # type: ignore[arg-type]
+        ro_hosts = {host for host, _ in p.ro_binds}
+        assert Path("/usr") in ro_hosts, f"/usr missing for mode={mode}"
+
+
+def test_policy_full_does_not_duplicate_system_ro_binds(tmp_path):
+    """``filesystem: full`` already passes through the host rootfs via
+    ``--bind / /``; adding ``--ro-bind /usr /usr`` on top would just be
+    noise (and under bwrap's ordering rules, ambiguous noise)."""
+    p = policy_from_trust(TrustSpec(filesystem="full"), workdir=tmp_path)
+    ro_hosts = {host for host, _ in p.ro_binds}
+    assert Path("/usr") not in ro_hosts
 
 
 def test_policy_fs_readonly_binds_scope_ro(tmp_path):

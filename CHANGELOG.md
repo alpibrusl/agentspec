@@ -30,10 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `find_bwrap`, `is_tight_trust`. Decoupled from the renderer so a
   native-namespaces backend can consume the same policy later.
 
-- **44 new tests** across `tests/test_isolation.py` (mapping +
+- **51 new tests** across `tests/test_isolation.py` (mapping +
   selection + argv rendering), `tests/test_runner_isolation.py`
   (runner integration with mocked bwrap and subprocess), and
   `tests/test_cli_isolation.py` (CLI flag parsing + env fallback).
+  Includes regressions for the PR #17 live-smoke findings: system
+  paths (`/usr`, `/bin`, `/etc`, …) are RO-bound in every
+  bounded-fs mode so the runtime can exec, and mount ordering flips
+  RW binds before RO binds so an RO scope sitting under a RW workdir
+  lands last and wins.
 
 - **Execution records.** Every `agentspec run` now writes a tamper-evident
   log to `{workdir}/.agentspec/records/<run-id>.json` capturing manifest

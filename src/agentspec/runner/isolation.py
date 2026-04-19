@@ -73,6 +73,46 @@ class IsolationPolicy:
 # allowlist dynamically by the caller — never hardcoded here.
 _BASE_ENV_ALLOWLIST = ["PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "USER"]
 
+# System paths every sandbox needs read-only so the spawned runtime
+# (and its dependencies — libc, OpenSSL / CA certs, resolv.conf when
+# network is allowed, user/group name lookups) are actually reachable
+# inside the sandbox. Discovered via a live smoke run against Ubuntu
+# 6.17: without these, ``filesystem: none`` / ``read-only`` / ``scoped``
+# fails with ``execvp: No such file or directory`` before the runtime
+# CLI even starts. Each candidate is bound only if it exists on the
+# host — ``/lib64`` is absent on multiarch Debian, etc.
+_SYSTEM_RO_BINDS: tuple[str, ...] = (
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/lib64",
+    "/lib32",
+    "/etc",
+)
+
+
+def _existing_system_ro_binds() -> list[tuple[Path, Path]]:
+    """Return the subset of ``_SYSTEM_RO_BINDS`` that exist on this host.
+
+    Resolves symlinks so bind-mounts don't flap between ``/bin`` and
+    ``/usr/bin`` on Ubuntu-like systems where ``/bin -> usr/bin``.
+    """
+    seen: set[Path] = set()
+    binds: list[tuple[Path, Path]] = []
+    for raw in _SYSTEM_RO_BINDS:
+        p = Path(raw)
+        if not p.exists():
+            continue
+        # If /bin is a symlink to /usr/bin and we've already bound /usr,
+        # skip — otherwise bwrap double-mounts.
+        resolved = p.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        binds.append((resolved, p))
+    return binds
+
 
 def is_tight_trust(trust: TrustSpec) -> bool:
     """True when any axis is more restrictive than fully permissive.
@@ -180,20 +220,29 @@ def policy_from_trust(
     (bwrap v1 can't filter egress; ``scoped`` degrades to ``allowed``
     with a resolver warning one level up — documented open question 5.)
     """
+    # Workdir is always the first rw-bind so ``--chdir`` lands there
+    # regardless of how other bindings layer on top. Under
+    # ``filesystem: full`` the later ``--bind / /`` covers the same
+    # path — harmless but redundant, noted in PR #17 second-pass review.
     rw_binds: list[tuple[Path, Path]] = [(workdir, workdir)]
     ro_binds: list[tuple[Path, Path]] = []
 
     if trust.filesystem == "full":
         rw_binds.append((Path("/"), Path("/")))
-    elif trust.filesystem == "read-only":
-        for raw in trust.scope:
-            p = Path(raw).resolve()
-            ro_binds.append((p, p))
-    elif trust.filesystem == "scoped":
-        for raw in trust.scope:
-            p = Path(raw).resolve()
-            rw_binds.append((p, p))
-    # trust.filesystem == "none" → nothing added beyond workdir.
+    else:
+        # Every bounded-fs mode needs the system binaries + libs + CA
+        # trust store + resolv.conf available read-only, or the runtime
+        # CLI can't even exec. Surfaced by the PR #17 smoke run.
+        ro_binds.extend(_existing_system_ro_binds())
+        if trust.filesystem == "read-only":
+            for raw in trust.scope:
+                p = Path(raw).resolve()
+                ro_binds.append((p, p))
+        elif trust.filesystem == "scoped":
+            for raw in trust.scope:
+                p = Path(raw).resolve()
+                rw_binds.append((p, p))
+        # trust.filesystem == "none" → only system binds + workdir.
 
     network = trust.network != "none"
 
@@ -266,7 +315,11 @@ def build_bwrap_argv(
         argv.extend(["--proc", "/proc"])
     else:
         # Standard sandbox: create the base rootfs (proc/dev/tmp), then
-        # layer specific binds on top.
+        # layer specific binds on top. RW binds emitted before RO so
+        # that when a scope path sits *under* the workdir (e.g. the
+        # author wants their RO sample data inside a writable workspace),
+        # the RO bind lands last and wins. Surfaced by the PR #17 smoke
+        # run.
         argv.extend(
             [
                 "--proc",
@@ -278,10 +331,10 @@ def build_bwrap_argv(
                 "/tmp",  # noqa: S108
             ]
         )
-        for host, sandbox in policy.ro_binds:
-            argv.extend(["--ro-bind", str(host), str(sandbox)])
         for host, sandbox in policy.rw_binds:
             argv.extend(["--bind", str(host), str(sandbox)])
+        for host, sandbox in policy.ro_binds:
+            argv.extend(["--ro-bind", str(host), str(sandbox)])
 
     # Env allowlist. Source from the caller-provided env dict so
     # layered env (Vertex routing, etc.) is honoured, not wiped by
