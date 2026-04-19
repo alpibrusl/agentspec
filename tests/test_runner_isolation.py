@@ -78,7 +78,7 @@ def test_execute_auto_without_bwrap_and_permissive_trust_runs_raw(
     tmp_path, fake_provision, fake_run, monkeypatch, caplog
 ):
     monkeypatch.setattr("shutil.which", lambda name: None)
-    caplog.set_level(logging.WARNING)
+    caplog.set_level(logging.WARNING, logger="agentspec.runner.runner")
 
     runner.execute(
         _plan(),
@@ -89,7 +89,14 @@ def test_execute_auto_without_bwrap_and_permissive_trust_runs_raw(
 
     argv = fake_run[0]["cmd"]
     assert argv[0] == "claude"  # unwrapped
-    # A warning was surfaced somewhere (logger or plan.warnings).
+
+    # Assert the warning was actually logged — PR #17 review called out
+    # that the previous version had a "A warning was surfaced somewhere"
+    # comment but no assertion.
+    assert any(
+        "unsandboxed" in r.message.lower() or "no isolation" in r.message.lower()
+        for r in caplog.records
+    ), f"expected an unsandboxed/no-isolation warning; got {[r.message for r in caplog.records]}"
 
 
 def test_execute_auto_without_bwrap_and_tight_trust_raises(
@@ -205,3 +212,84 @@ def test_record_captures_isolation_backend_used(
     r = RecordManager(tmp_path).list()[0]
     # Warning about running unsandboxed should have been carried through.
     assert any("unsandboxed" in w.lower() or "no isolation" in w.lower() for w in r.warnings)
+
+
+# ── Regressions for PR #17 review ─────────────────────────────────────────────
+
+
+def test_execute_does_not_mutate_plan_warnings(
+    tmp_path, fake_provision, fake_run, monkeypatch
+):
+    """PR #17 review: warnings emitted by backend selection were being
+    written back onto ``plan.warnings`` in-place, so reusing a plan
+    (tests, future retry paths) accumulated stale warnings across runs."""
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    plan = _plan()
+    plan.warnings = []  # start empty; seed known baseline
+    original = list(plan.warnings)
+
+    runner.execute(
+        plan,
+        _manifest(TrustSpec(filesystem="full", network="allowed", exec="full")),
+        workdir=tmp_path,
+        emit_record=False,
+    )
+
+    assert plan.warnings == original, (
+        f"plan.warnings mutated: {plan.warnings!r} (baseline {original!r})"
+    )
+
+
+def test_vertex_auth_propagates_routing_vars_into_sandbox(
+    tmp_path, fake_provision, fake_run, monkeypatch
+):
+    """PR #17 review ship-blocker: when auth_source is Vertex AI, the
+    Vertex routing env vars must be on the sandbox env allowlist **and**
+    sourced from the enriched env dict (build_env overlays them). Without
+    both, ``--clearenv`` wipes them and the sandboxed runtime fails
+    auth inside the sandbox."""
+    monkeypatch.setattr("shutil.which", lambda name: "/bin/bwrap")
+
+    # Stand in for build_env's layering — simulate that Vertex routing
+    # landed in the subprocess env dict the runner will pass down.
+    def _fake_build_env(plan):
+        return {
+            "PATH": "/usr/bin:/bin",
+            "HOME": "/home/u",
+            "CLAUDE_CODE_USE_VERTEX": "1",
+            "ANTHROPIC_VERTEX_PROJECT_ID": "my-project",
+            "VERTEX_PROJECT": "my-project",
+            "VERTEX_LOCATION": "us-central1",
+            "GOOGLE_GENAI_USE_VERTEXAI": "true",
+            "CLOUD_ML_REGION": "us-central1",
+        }
+
+    monkeypatch.setattr(runner, "build_env", _fake_build_env)
+
+    vertex_plan = ResolvedPlan(
+        runtime="claude-code",
+        model="claude/claude-sonnet-4-6",
+        tools=[],
+        auth_source="vertex-ai",
+        system_prompt="",
+        warnings=[],
+        decisions=[],
+    )
+    runner.execute(vertex_plan, _manifest(), workdir=tmp_path, emit_record=False)
+
+    argv = fake_run[0]["cmd"]
+    # Collect --setenv triples.
+    triples: dict[str, str] = {}
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--setenv" and i + 2 < len(argv):
+            triples[argv[i + 1]] = argv[i + 2]
+            i += 3
+        else:
+            i += 1
+
+    assert triples.get("CLAUDE_CODE_USE_VERTEX") == "1"
+    assert triples.get("ANTHROPIC_VERTEX_PROJECT_ID") == "my-project"
+    assert triples.get("VERTEX_PROJECT") == "my-project"
+    assert triples.get("VERTEX_LOCATION") == "us-central1"
+    assert triples.get("GOOGLE_GENAI_USE_VERTEXAI") == "true"

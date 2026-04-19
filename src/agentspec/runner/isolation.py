@@ -38,7 +38,6 @@ layer is a normal dataclass so adding a second backend later is mechanical.
 
 from __future__ import annotations
 
-import os
 import shutil
 from dataclasses import dataclass, field
 from enum import Enum
@@ -93,7 +92,11 @@ def is_tight_trust(trust: TrustSpec) -> bool:
 def find_bwrap() -> str | None:
     """Return the absolute path of ``bwrap`` on PATH, or None.
 
-    Kept trivial so tests monkeypatch ``shutil.which`` directly.
+    Intentionally calls ``shutil.which`` via the module attribute — do
+    **not** refactor to ``from shutil import which``. Tests
+    monkeypatch ``"shutil.which"`` directly to simulate absent / present
+    bwrap; a local rebinding would break that and silently couple tests
+    to whatever's on the CI host.
     """
     return shutil.which("bwrap")
 
@@ -212,6 +215,7 @@ def build_bwrap_argv(
     bwrap_path: str,
     policy: IsolationPolicy,
     cmd: list[str],
+    env: dict[str, str],
 ) -> list[str]:
     """Render an ``IsolationPolicy`` + user ``cmd`` into a bwrap argv.
 
@@ -222,13 +226,22 @@ def build_bwrap_argv(
     - ``--die-with-parent``  — sandbox reaps if parent exits
     - ``--cap-drop ALL``     — drop every Linux capability
     - ``--clearenv``         — wipe env; rebuild from allowlist only
-    - ``--proc /proc`` / ``--dev /dev`` / ``--tmpfs /tmp`` — minimal
-      filesystem expected by most CLIs
     - ``--share-net`` only when ``policy.network``
 
-    Env values are read from ``os.environ`` at build time. Missing
-    vars are skipped silently (``--setenv`` with an empty value would
-    set the var to empty, which is not the same as "unset").
+    Mount ordering: ``--proc`` / ``--dev`` / ``--tmpfs /tmp`` are
+    emitted **after** binds so later mounts override the binds at the
+    specific paths they occupy. Without this, the ``filesystem: full``
+    case (which includes ``--bind / /``) shadowed the synthetic
+    ``/proc`` mount and exposed the host's ``/proc`` under the fresh
+    PID namespace — reported in PR #17 review. The ``filesystem: full``
+    path now emits ``--bind / /`` first, then only ``--proc /proc``
+    (fresh procfs required for ``--unshare-pid`` consistency); host
+    ``/dev`` and ``/tmp`` pass through unchanged.
+
+    Env values are sourced from the ``env`` dict — crucially **not**
+    from ``os.environ`` — so layered env (Vertex routing vars, for
+    example) reaches the sandboxed runtime. Missing names are dropped
+    silently (``--setenv`` with empty value ≠ unset).
     """
     argv: list[str] = [
         bwrap_path,
@@ -237,28 +250,44 @@ def build_bwrap_argv(
         "--cap-drop",
         "ALL",
         "--clearenv",
-        "--proc",
-        "/proc",
-        "--dev",
-        "/dev",
-        # /tmp is the mount point inside the sandbox, not a host path — S108
-        # is a false positive here. Bwrap creates a fresh tmpfs.
-        "--tmpfs",
-        "/tmp",  # noqa: S108
     ]
 
     if policy.network:
         argv.append("--share-net")
 
-    # RO binds first so a later RW bind at the same path shadows them.
-    for host, sandbox in policy.ro_binds:
-        argv.extend(["--ro-bind", str(host), str(sandbox)])
-    for host, sandbox in policy.rw_binds:
-        argv.extend(["--bind", str(host), str(sandbox)])
+    has_root_bind = any(Path(str(h)) == Path("/") for h, _ in policy.rw_binds)
 
-    # Env allowlist.
+    if has_root_bind:
+        # Host-passthrough mode for ``filesystem: full``. Bind `/` first
+        # so subsequent mounts override at their specific paths.
+        for host, sandbox in policy.rw_binds:
+            argv.extend(["--bind", str(host), str(sandbox)])
+        # Still need a fresh procfs because of ``--unshare-pid``.
+        argv.extend(["--proc", "/proc"])
+    else:
+        # Standard sandbox: create the base rootfs (proc/dev/tmp), then
+        # layer specific binds on top.
+        argv.extend(
+            [
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                # /tmp is inside-sandbox — S108 false positive.
+                "--tmpfs",
+                "/tmp",  # noqa: S108
+            ]
+        )
+        for host, sandbox in policy.ro_binds:
+            argv.extend(["--ro-bind", str(host), str(sandbox)])
+        for host, sandbox in policy.rw_binds:
+            argv.extend(["--bind", str(host), str(sandbox)])
+
+    # Env allowlist. Source from the caller-provided env dict so
+    # layered env (Vertex routing, etc.) is honoured, not wiped by
+    # --clearenv. See PR #17 review.
     for name in policy.env_allowlist:
-        val = os.environ.get(name)
+        val = env.get(name)
         if val is not None:
             argv.extend(["--setenv", name, val])
 

@@ -89,12 +89,17 @@ def execute(
     cmd = build_command(plan, manifest, input_text)
     env = build_env(plan)
 
+    # Accumulate warnings locally and merge them into the record at the
+    # end — mutating ``plan.warnings`` in-place confuses callers that
+    # reuse a plan (PR #17 review).
+    run_warnings: list[str] = list(plan.warnings or [])
+
     backend, warning = select_backend(
         manifest.trust, requested=via, allow_unsafe=unsafe_no_isolation
     )
     if warning:
         log.warning(warning)
-        plan.warnings = list(plan.warnings or []) + [warning]
+        run_warnings.append(warning)
 
     if backend == IsolationBackend.BWRAP:
         bwrap_path = find_bwrap()
@@ -105,7 +110,10 @@ def execute(
             workdir=workdir,
             extra_env_allowlist=_env_allowlist_for_plan(plan),
         )
-        cmd = build_bwrap_argv(bwrap_path, policy, cmd)
+        # Source env values from the enriched ``env`` dict (not os.environ)
+        # so layered routing vars — Vertex AI in particular — reach the
+        # sandboxed runtime after ``--clearenv``. PR #17 review.
+        cmd = build_bwrap_argv(bwrap_path, policy, cmd, env)
 
     run_id = new_run_id()
     started_at = _utc_now_iso()
@@ -122,6 +130,7 @@ def execute(
             started_at=started_at,
             duration_s=time.monotonic() - start_monotonic,
             exit_code=result.returncode,
+            warnings=run_warnings,
         )
 
     return result.returncode
@@ -150,6 +159,21 @@ def _env_allowlist_for_plan(plan: ResolvedPlan) -> list[str]:
                 "GOOGLE_CLOUD_LOCATION",
             ]
         )
+    # Vertex AI routing vars — ``build_env`` layers these on top when the
+    # resolver picked Vertex. Without the allowlist entries, ``--clearenv``
+    # wipes them and the runtime falls back to direct-API auth inside the
+    # sandbox, breaking the run with a cryptic auth error. PR #17 review.
+    if "vertex" in src:
+        allowlist.extend(
+            [
+                "CLAUDE_CODE_USE_VERTEX",
+                "ANTHROPIC_VERTEX_PROJECT_ID",
+                "GOOGLE_GENAI_USE_VERTEXAI",
+                "VERTEX_PROJECT",
+                "VERTEX_LOCATION",
+                "CLOUD_ML_REGION",
+            ]
+        )
     return allowlist
 
 
@@ -166,6 +190,7 @@ def _write_record(
     started_at: str,
     duration_s: float,
     exit_code: int,
+    warnings: list[str] | None = None,
 ) -> None:
     """Build an ExecutionRecord from the run and persist it.
 
@@ -173,8 +198,17 @@ def _write_record(
     ``failure``. Signal-based terminations (aborted/timeout) would need
     caller-side knowledge the runner does not currently have; they can
     be added when the CLI grows ``--timeout``.
+
+    ``warnings`` carries run-local warnings (e.g. from the isolation
+    backend selector) that should be recorded even if they were never
+    mutated onto the shared ``plan.warnings``. Falls back to
+    ``plan.warnings`` when None so programmatic callers of
+    ``_write_record`` stay source-compatible.
     """
     outcome = "success" if exit_code == 0 else "failure"
+    effective_warnings = (
+        list(warnings) if warnings is not None else list(plan.warnings or [])
+    )
     record = ExecutionRecord(
         run_id=run_id,
         manifest_hash=agent_hash(manifest),
@@ -185,7 +219,7 @@ def _write_record(
         model=plan.model or None,
         exit_code=exit_code,
         outcome=outcome,
-        warnings=list(plan.warnings or []),
+        warnings=effective_warnings,
     )
     RecordManager(workdir).write(record)
 

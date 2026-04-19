@@ -182,13 +182,30 @@ def _minimal_policy(tmp_path: Path) -> IsolationPolicy:
     )
 
 
+def _setenv_triples(argv: list[str]) -> dict[str, str]:
+    """Extract all ``--setenv NAME VALUE`` triples into a dict.
+
+    Safer than substring-matching on ``" ".join(argv)`` — a value that
+    contains spaces would pass a naive check spuriously.
+    """
+    result: dict[str, str] = {}
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--setenv" and i + 2 < len(argv):
+            result[argv[i + 1]] = argv[i + 2]
+            i += 3
+        else:
+            i += 1
+    return result
+
+
 def test_argv_starts_with_bwrap_path(tmp_path):
-    argv = build_bwrap_argv("/bin/bwrap", _minimal_policy(tmp_path), ["claude"])
+    argv = build_bwrap_argv("/bin/bwrap", _minimal_policy(tmp_path), ["claude"], {})
     assert argv[0] == "/bin/bwrap"
 
 
 def test_argv_contains_core_isolation_flags(tmp_path):
-    argv = build_bwrap_argv("/bin/bwrap", _minimal_policy(tmp_path), ["claude"])
+    argv = build_bwrap_argv("/bin/bwrap", _minimal_policy(tmp_path), ["claude"], {})
     assert "--unshare-all" in argv
     assert "--die-with-parent" in argv
     assert "--cap-drop" in argv
@@ -198,18 +215,18 @@ def test_argv_contains_core_isolation_flags(tmp_path):
 def test_argv_adds_share_net_when_network_true(tmp_path):
     p = _minimal_policy(tmp_path)
     p.network = True
-    argv = build_bwrap_argv("/bin/bwrap", p, ["claude"])
+    argv = build_bwrap_argv("/bin/bwrap", p, ["claude"], {})
     assert "--share-net" in argv
 
 
 def test_argv_omits_share_net_when_network_false(tmp_path):
-    argv = build_bwrap_argv("/bin/bwrap", _minimal_policy(tmp_path), ["claude"])
+    argv = build_bwrap_argv("/bin/bwrap", _minimal_policy(tmp_path), ["claude"], {})
     assert "--share-net" not in argv
 
 
 def test_argv_binds_rw_paths(tmp_path):
     p = _minimal_policy(tmp_path)
-    argv = build_bwrap_argv("/bin/bwrap", p, ["claude"])
+    argv = build_bwrap_argv("/bin/bwrap", p, ["claude"], {})
     # --bind <host> <sandbox> for each rw bind
     idx = argv.index("--bind")
     assert argv[idx + 1] == str(tmp_path)
@@ -224,29 +241,83 @@ def test_argv_binds_ro_paths(tmp_path):
         network=False,
         env_allowlist=[],
     )
-    argv = build_bwrap_argv("/bin/bwrap", p, ["claude"])
+    argv = build_bwrap_argv("/bin/bwrap", p, ["claude"], {})
     idx = argv.index("--ro-bind")
     assert argv[idx + 1] == str(extra)
     assert argv[idx + 2] == str(extra)
 
 
-def test_argv_sets_env_for_each_allowed_var(tmp_path, monkeypatch):
-    monkeypatch.setenv("PATH", "/usr/bin:/bin")
-    monkeypatch.setenv("HOME", "/home/user")
+def test_argv_sets_env_from_env_dict_not_os_environ(tmp_path, monkeypatch):
+    """Regression for PR #17 review: values must come from the passed
+    ``env`` dict, not ``os.environ``. That's how layered env (Vertex
+    routing, for example) reaches the sandboxed runtime after
+    ``--clearenv``."""
+    # Set host env so the old code would find it there — we want to
+    # prove the function sources from the dict instead.
+    monkeypatch.setenv("PATH", "/host/path")
+    monkeypatch.setenv("VERTEX_PROJECT", "host-project")
+
+    env = {"PATH": "/injected:/bin", "VERTEX_PROJECT": "overridden-project"}
     p = IsolationPolicy(
         ro_binds=[],
         rw_binds=[(tmp_path, tmp_path)],
         network=False,
-        env_allowlist=["PATH", "HOME"],
+        env_allowlist=["PATH", "VERTEX_PROJECT"],
     )
-    argv = build_bwrap_argv("/bin/bwrap", p, ["claude"])
-    # Every allowlisted env var should be passed with --setenv.
-    joined = " ".join(argv)
-    assert "--setenv PATH /usr/bin:/bin" in joined
-    assert "--setenv HOME /home/user" in joined
+
+    triples = _setenv_triples(build_bwrap_argv("/bin/bwrap", p, ["claude"], env))
+    assert triples["PATH"] == "/injected:/bin"
+    assert triples["VERTEX_PROJECT"] == "overridden-project"
 
 
 def test_argv_ends_with_user_command(tmp_path):
-    argv = build_bwrap_argv("/bin/bwrap", _minimal_policy(tmp_path), ["claude", "-p", "hi"])
+    argv = build_bwrap_argv(
+        "/bin/bwrap", _minimal_policy(tmp_path), ["claude", "-p", "hi"], {}
+    )
     # User command goes after all the bwrap flags.
     assert argv[-3:] == ["claude", "-p", "hi"]
+
+
+# ── Mount ordering — regression for PR #17 review ────────────────────────────
+
+
+def test_argv_for_filesystem_full_binds_root_before_proc(tmp_path):
+    """``filesystem: full`` emits ``--bind / /`` and a fresh ``/proc``
+    after it — not before. If ``--proc`` came first, binding ``/``
+    would shadow it and expose the host's procfs under the fresh PID
+    namespace, breaking PID consistency."""
+    policy = policy_from_trust(TrustSpec(filesystem="full"), workdir=tmp_path)
+    argv = build_bwrap_argv("/bin/bwrap", policy, ["claude"], {})
+
+    bind_root_idx = None
+    for i in range(len(argv) - 2):
+        if argv[i] == "--bind" and argv[i + 1] == "/" and argv[i + 2] == "/":
+            bind_root_idx = i
+            break
+    assert bind_root_idx is not None, f"--bind / / missing from argv: {argv}"
+
+    proc_idx = argv.index("--proc")
+    assert bind_root_idx < proc_idx, "--bind / / must precede --proc /proc"
+
+
+def test_argv_for_filesystem_full_omits_synthetic_tmpfs_and_dev(tmp_path):
+    """``filesystem: full`` passes through the host's /dev and /tmp.
+    Emitting ``--tmpfs /tmp`` after ``--bind / /`` would create a
+    fresh tmpfs that shadows the host /tmp the user asked for."""
+    policy = policy_from_trust(TrustSpec(filesystem="full"), workdir=tmp_path)
+    argv = build_bwrap_argv("/bin/bwrap", policy, ["claude"], {})
+    assert "--tmpfs" not in argv
+    assert "--dev" not in argv
+
+
+def test_argv_for_bounded_fs_creates_base_before_binds(tmp_path):
+    """In the standard sandbox (fs != full), special mounts set up the
+    base rootfs first and binds layer on top. Order matters because a
+    bind under /tmp needs the tmpfs to already exist for bwrap to
+    create intermediate dirs."""
+    policy = policy_from_trust(TrustSpec(filesystem="none"), workdir=tmp_path)
+    argv = build_bwrap_argv("/bin/bwrap", policy, ["claude"], {})
+
+    tmpfs_idx = argv.index("--tmpfs")
+    bind_idx = argv.index("--bind")
+    assert tmpfs_idx < bind_idx
