@@ -95,23 +95,39 @@ _SYSTEM_RO_BINDS: tuple[str, ...] = (
 def _existing_system_ro_binds() -> list[tuple[Path, Path]]:
     """Return the subset of ``_SYSTEM_RO_BINDS`` that exist on this host.
 
-    Resolves symlinks so bind-mounts don't flap between ``/bin`` and
-    ``/usr/bin`` on Ubuntu-like systems where ``/bin -> usr/bin``.
+    Prefix-aware dedup: on Ubuntu where ``/bin -> usr/bin`` is a
+    symlink, resolving both candidates gives ``/usr`` and ``/usr/bin``.
+    A plain set check treats them as distinct, so bwrap ends up with
+    the same content mounted at both ``/usr`` and ``/bin``. Checking
+    whether a candidate's resolved path is nested inside an already
+    committed one drops the redundant bind. Noted in PR #17 third-pass
+    review.
     """
-    seen: set[Path] = set()
+    committed: list[Path] = []
     binds: list[tuple[Path, Path]] = []
     for raw in _SYSTEM_RO_BINDS:
         p = Path(raw)
         if not p.exists():
             continue
-        # If /bin is a symlink to /usr/bin and we've already bound /usr,
-        # skip — otherwise bwrap double-mounts.
         resolved = p.resolve()
-        if resolved in seen:
+        # Skip when a parent directory is already committed — that bind
+        # already covers this path's contents.
+        if any(_is_same_or_descendant(resolved, existing) for existing in committed):
             continue
-        seen.add(resolved)
+        committed.append(resolved)
         binds.append((resolved, p))
     return binds
+
+
+def _is_same_or_descendant(candidate: Path, existing: Path) -> bool:
+    """True when ``candidate`` is ``existing`` or lives inside it."""
+    if candidate == existing:
+        return True
+    try:
+        candidate.relative_to(existing)
+    except ValueError:
+        return False
+    return True
 
 
 def is_tight_trust(trust: TrustSpec) -> bool:
@@ -219,6 +235,14 @@ def policy_from_trust(
     Network mapping: ``none`` disables, ``scoped``/``allowed`` enable.
     (bwrap v1 can't filter egress; ``scoped`` degrades to ``allowed``
     with a resolver warning one level up — documented open question 5.)
+
+    .. note::
+       Scope paths should live outside the standard system trees
+       (``/usr``, ``/bin``, ``/etc``, …). Anything nested under a
+       system path is shadowed by the read-only system bind and will
+       not be writable even under ``scoped`` — project directories
+       like ``~/projects/foo`` or ``/srv/data`` are the intended
+       shape.
     """
     # Workdir is always the first rw-bind so ``--chdir`` lands there
     # regardless of how other bindings layer on top. Under
