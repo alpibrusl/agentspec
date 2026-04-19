@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-04-19
+
+The "Docker of agents" release — six load-bearing features that
+together let you publish, distribute, pin, run, and audit an agent
+with end-to-end cryptographic provenance. Validated in-process by
+the `demo/pitch-smoke.sh` pipeline that exercises
+push (multi-tenant) → pull (anonymous public-read) → lock (signed
+Ed25519 envelope) → run (bwrap-isolated, signature-verified) →
+record (tamper-evident log) end-to-end.
+
 ### Added
 
 - **Lockfiles** (`agentspec.lock/v1`). Pin the resolver's output —
@@ -125,6 +135,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `_parse_keys` parsing, tenant-ID validation, push/delete/get/list
   isolation, legacy-key fallback, and storage-layer scoping.
 
+- **`test-echo` pseudo-runtime.** Zero-dependency runtime mapping to
+  POSIX `echo`. Lets integration tests, demo scripts, and CI smokes
+  exercise the full push → pull → lock → run → record pipeline
+  without installing any real LLM CLI (claude-code / gemini-cli /
+  etc.). Registered in `RUNTIME_BINARIES`, `PROVIDER_MAP` (no auth),
+  and the runner's builder dispatch.
+
+- **`python -m agentspec`** entry point. The installed `agentspec`
+  console-script shebang is fragile across venv relocations; `python
+  -m agentspec` is portable and standard. Added via
+  `src/agentspec/__main__.py`.
+
+- **`demo/pitch-smoke.sh`** — 8-step end-to-end integration smoke
+  that validates the whole pipeline using the `test-echo` runtime.
+  Generates an Ed25519 keypair, stands up a local multi-tenant
+  registry, pushes as alice, proves cross-tenant isolation on reads
+  (bob's authenticated pull of alice's hash 404s), proves public-read
+  aggregation (anonymous pull succeeds), locks with signing, runs
+  under bwrap with `--require-signed --pubkey`, verifies the record,
+  then tamper-tests the lock (must refuse). Prereqs: `bwrap`,
+  `python3`, `curl`.
+
 ### Changed
 
 - **Legacy `AGENTSPEC_API_KEY` now maps to tenant `default`.** Existing
@@ -145,6 +177,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`RegistryStorage()`** now reads `AGENTSPEC_REGISTRY_DIR` at
   construction time (was: at module import). Tests that monkeypatch
   the env per-function now get proper isolation.
+
+### Fixed
+
+- **Registry client didn't parse the native server's pull response.**
+  `registry.client.pull_agent` expected either a Noether
+  `{"ok", "data": {"result": {...}}}` envelope or a flat manifest at
+  the top level; the agentspec-native server returns
+  `{"hash": "...", "manifest": {...}}` — neither shape was
+  recognised. Anonymous pulls against agentspec's own registry
+  silently fell through to a `/stages/{id}` Noether fallback that
+  doesn't exist on the native server, returning `None` → CLI
+  `NOT_FOUND`. Surfaced by the end-to-end smoke (PR #20).
+
+- **Runner didn't flush stdout before `subprocess.run`.** When
+  `agentspec run` was piped (e.g. `agentspec run | tee`), Python's
+  block-buffered stdout held the "Launching…" log line while the
+  subprocess's line-buffered output went out immediately, producing
+  an inverted log order at process exit. Cosmetic but surprising.
+  Fix: `sys.stdout.flush()` + `sys.stderr.flush()` before the
+  subprocess spawn.
 
 ## [0.4.0] — 2026-04-17
 

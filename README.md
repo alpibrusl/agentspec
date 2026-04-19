@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/License-EUPL--1.2-blue.svg)](https://eupl.eu/)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org)
-[![Tests](https://img.shields.io/badge/tests-278%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-431%20passing-brightgreen.svg)](tests/)
 
 Existing agent formats (gitagent, Agent Format, OSSA, Open Agent Spec) are static config files. AgentSpec is two things neither of them does:
 
