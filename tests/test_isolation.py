@@ -144,52 +144,55 @@ def test_policy_full_does_not_duplicate_system_ro_binds(tmp_path):
     assert Path("/usr") not in ro_hosts
 
 
-def test_existing_system_ro_binds_prefix_dedup_skips_symlinked_children(monkeypatch):
-    """On distros where ``/bin -> /usr/bin``, both resolve into the
-    ``/usr`` tree. Without prefix-aware dedup the sandbox ends up with
-    identical content mounted at ``/usr`` and ``/bin``. Regression for
-    PR #17 third-pass review."""
+def test_existing_system_ro_binds_preserves_elf_loader_symlinks(monkeypatch):
+    """ELF binaries hardcode ``/lib64/ld-linux-x86-64.so.2`` as their
+    interpreter. On modern Debian/Ubuntu ``/lib64`` is a symlink to
+    ``/usr/lib64``; an earlier version of this helper deduped symlinks
+    whose resolved target already fell under an earlier bind, which
+    left ``/lib64`` absent from the sandbox and the ELF loader unable
+    to start.
+
+    Regression for the v0.5.1 smoke run: ``filesystem: none`` + the
+    direct-bwrap path failed with a confusing ``execvp <binary>:
+    No such file or directory`` on every binary because the kernel
+    couldn't resolve the interpreter path. Each existing symlinked
+    system path must be bound at its original name, even if the target
+    is reachable via ``/usr``."""
     from agentspec.runner.isolation import _existing_system_ro_binds
 
     class _Fake:
-        """Stand-in for ``Path(raw)`` with controllable ``exists`` /
-        ``resolve``. Real Path objects can't be monkeypatched on-a-path
-        basis without touching the filesystem."""
-
-        def __init__(self, raw: str, resolved: str):
+        def __init__(self, raw: str):
             self.raw = raw
-            self._resolved = Path(resolved)
 
         def exists(self) -> bool:
             return True
 
-        def resolve(self) -> Path:
-            return self._resolved
-
         def __fspath__(self) -> str:
             return self.raw
 
-    fakes = {
-        "/usr": _Fake("/usr", "/usr"),
-        "/bin": _Fake("/bin", "/usr/bin"),
-        "/sbin": _Fake("/sbin", "/usr/sbin"),
-        "/lib": _Fake("/lib", "/usr/lib"),
-        "/lib64": _Fake("/lib64", "/usr/lib64"),
-        "/lib32": _Fake("/lib32", "/usr/lib32"),
-        "/etc": _Fake("/etc", "/etc"),
-    }
+        def __eq__(self, other):
+            return isinstance(other, _Fake) and self.raw == other.raw or (
+                isinstance(other, Path) and str(other) == self.raw
+            )
+
+        def __hash__(self):
+            return hash(self.raw)
+
+        def __str__(self):
+            return self.raw
+
+    present = {"/usr", "/bin", "/sbin", "/lib", "/lib64", "/lib32", "/etc"}
     monkeypatch.setattr(
         "agentspec.runner.isolation.Path",
-        lambda raw: fakes.get(raw, Path(raw)),
+        lambda raw: _Fake(raw) if raw in present else Path(raw),
     )
 
     binds = _existing_system_ro_binds()
-    # /usr covers /bin, /sbin, /lib*; /etc is independent.
-    hosts = [str(host) for host, _ in binds]
-    assert "/usr" in hosts
-    assert "/etc" in hosts
-    assert "/usr/bin" not in hosts, f"prefix dedup missed /bin in {hosts}"
-    assert "/usr/lib" not in hosts, f"prefix dedup missed /lib in {hosts}"
+    hosts = {str(host) for host, _ in binds}
+
+    # Every existing path must be bound at its own name.
+    for required in ("/usr", "/bin", "/lib", "/lib64", "/etc"):
+        assert required in hosts, f"{required} missing; ELF loader would fail"
 
 
 def test_policy_fs_readonly_binds_scope_ro(tmp_path):
