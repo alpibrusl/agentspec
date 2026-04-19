@@ -91,13 +91,42 @@ against.
   as executable inputs — do not provision manifests from untrusted
   sources on a host you are not willing to lose.
 
+### Runner isolation (`agentspec.runner.isolation`)
+
+- The runner wraps the spawned CLI in bubblewrap (`bwrap`) when
+  available, deriving the sandbox policy from the manifest's
+  `TrustSpec` (filesystem / network / exec axes). Fresh namespaces,
+  `--cap-drop ALL`, `--die-with-parent`, `--clearenv` with an
+  allowlist, `/nix/store`-style RO binds, workdir-only RW by default.
+- `--via auto` (default) picks bwrap when installed; falls back to
+  running unsandboxed on a fully permissive manifest with a warning;
+  **raises** on a non-trivial trust manifest when bwrap is missing
+  (no silent downgrade).
+- `--via bwrap` requires bwrap; fail fast if missing.
+- `--via none --unsafe-no-isolation` is the explicit opt-out.
+  `AGENTSPEC_ISOLATION=auto|bwrap|none` is the env fallback.
+- Phase 1 is bwrap. It does not block `execve` by itself —
+  `trust.exec: none` is enforced by cap-drop + the bind-mount set (no
+  path to an arbitrary binary), not by seccomp. Phase 2 (native
+  namespaces + Landlock + seccomp) is planned in agentspec Proposal
+  002 and waits on either native implementation or delegation to
+  noether's [future run-external](https://github.com/alpibrusl/noether/issues/36).
+- Per-URL network allowlisting is not implemented. `trust.network:
+  scoped` degrades to `allowed` with a resolver warning. Closing this
+  is a Phase 2 item.
+- On macOS / Windows, bwrap is unavailable; `--via auto` falls back to
+  `NONE` with a platform warning. Tight-trust manifests on those
+  platforms raise unless `--unsafe-no-isolation` is set.
+
 ### What AgentSpec does **not** do
 
-- It does not sandbox the spawned CLI. The subprocess runs with the
-  privileges of the invoking user.
 - It does not verify that a manifest's declared `runtime` or `model`
   will behave as stated — choosing a runtime is the spec's job, not
   proving the runtime is honest.
 - It does not audit MCP servers. Well-known servers in the bundled
   registry come from published upstreams; review `WELL_KNOWN_MCP_SERVERS`
   before relying on any entry.
+- It does not prevent a sandboxed runtime from *generating* harmful
+  text and sending it back to you. The sandbox is process-level; it
+  does not filter model output. Output filtering / tool-call
+  allowlists are a separate concern upstream of the runner.

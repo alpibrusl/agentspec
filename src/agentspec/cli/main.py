@@ -71,6 +71,16 @@ def run(
         OutputFormat.text, "--output", help="Output format. type:enum[text|json|table]"
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Resolve without executing. type:bool"),
+    via: str = typer.Option(
+        "",
+        "--via",
+        help="Isolation backend: auto|bwrap|none. Defaults to auto (use bwrap if installed). Reads AGENTSPEC_ISOLATION env if unset. type:string",
+    ),
+    unsafe_no_isolation: bool = typer.Option(
+        False,
+        "--unsafe-no-isolation",
+        help="Acknowledge running a tight-trust manifest without a sandbox. Required with --via=none on non-permissive manifests. type:bool",
+    ),
 ) -> None:
     """Resolve and run an agent from a .agent file or directory."""
     start = time.time()
@@ -116,7 +126,20 @@ def run(
         sys.stdout.write(f"\nLaunching {plan.runtime}...\n")
 
     input_text = input_ if input_ else None
-    returncode = execute(plan, manifest, input_text)
+    resolved_via = via or os.environ.get("AGENTSPEC_ISOLATION") or None
+    try:
+        returncode = execute(
+            plan,
+            manifest,
+            input_text,
+            via=resolved_via,
+            unsafe_no_isolation=unsafe_no_isolation,
+        )
+    except RuntimeError as exc:
+        raise PreconditionError(
+            str(exc),
+            hint="Install bubblewrap, pass --via=none --unsafe-no-isolation, or relax the manifest's trust block",
+        ) from exc
     raise SystemExit(returncode)
 
 

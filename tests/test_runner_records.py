@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentspec.parser.loader import agent_hash
-from agentspec.parser.manifest import AgentManifest
+from agentspec.parser.manifest import AgentManifest, TrustSpec
 from agentspec.records.manager import RecordManager
 from agentspec.resolver.resolver import ResolvedPlan
 from agentspec.runner import runner
@@ -39,10 +39,17 @@ def fake_provision(monkeypatch):
 
 
 def _manifest() -> AgentManifest:
+    # Permissive trust keeps these records-focused tests decoupled from
+    # the isolation backend: without it, ``TrustSpec()`` defaults to
+    # ``filesystem=none / network=none / exec=none`` (tight) and the
+    # isolation layer correctly raises when bwrap isn't on PATH — which
+    # CI runners typically lack. Records behaviour is what's under test
+    # here; isolation coverage lives in ``test_runner_isolation.py``.
     return AgentManifest(
         name="test-agent",
         version="0.1.0",
         runtime="claude-code",
+        trust=TrustSpec(filesystem="full", network="allowed", exec="full"),
     )
 
 

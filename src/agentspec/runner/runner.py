@@ -10,10 +10,9 @@ identity, rules, skill instructions, and tool registrations natively.
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
-import sys
-import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,7 +23,16 @@ from agentspec.records.manager import RecordManager, new_run_id
 from agentspec.records.models import ExecutionRecord
 from agentspec.resolver.resolver import ResolvedPlan
 from agentspec.resolver.vertex import detect_vertex_ai, vertex_env_for_runtime
+from agentspec.runner.isolation import (
+    IsolationBackend,
+    build_bwrap_argv,
+    find_bwrap,
+    policy_from_trust,
+    select_backend,
+)
 from agentspec.runner.provisioner import provision
+
+log = logging.getLogger(__name__)
 
 
 # Runtime → command builder
@@ -55,6 +63,8 @@ def execute(
     workdir: Path | None = None,
     *,
     emit_record: bool = True,
+    via: str | None = None,
+    unsafe_no_isolation: bool = False,
 ) -> int:
     """Execute the agent by spawning the resolved runtime.
 
@@ -62,11 +72,48 @@ def execute(
     spawning. When *emit_record* is True (the default), writes a signed
     or unsigned execution record under
     ``{workdir}/.agentspec/records/<run-id>.json`` describing what ran.
+
+    Isolation:
+
+    - ``via=None`` / ``"auto"`` auto-detects bubblewrap on PATH. If
+      present, the subprocess is wrapped in bwrap with a policy derived
+      from ``manifest.trust``. If absent, a manifest with non-trivial
+      trust raises; a fully permissive manifest runs unsandboxed with
+      a warning (matches the v0.4.x behaviour).
+    - ``via="bwrap"`` requires bwrap and fails fast if missing.
+    - ``via="none"`` explicitly skips isolation. With non-trivial
+      trust this raises unless ``unsafe_no_isolation=True``.
     """
     workdir = workdir or Path.cwd()
     provision(plan, manifest, workdir)
     cmd = build_command(plan, manifest, input_text)
     env = build_env(plan)
+
+    # Accumulate warnings locally and merge them into the record at the
+    # end — mutating ``plan.warnings`` in-place confuses callers that
+    # reuse a plan (PR #17 review).
+    run_warnings: list[str] = list(plan.warnings or [])
+
+    backend, warning = select_backend(
+        manifest.trust, requested=via, allow_unsafe=unsafe_no_isolation
+    )
+    if warning:
+        log.warning(warning)
+        run_warnings.append(warning)
+
+    if backend == IsolationBackend.BWRAP:
+        bwrap_path = find_bwrap()
+        if bwrap_path is None:  # defensive — select_backend should have caught this
+            raise RuntimeError("bwrap backend selected but binary not found")
+        policy = policy_from_trust(
+            manifest.trust,
+            workdir=workdir,
+            extra_env_allowlist=_env_allowlist_for_plan(plan),
+        )
+        # Source env values from the enriched ``env`` dict (not os.environ)
+        # so layered routing vars — Vertex AI in particular — reach the
+        # sandboxed runtime after ``--clearenv``. PR #17 review.
+        cmd = build_bwrap_argv(bwrap_path, policy, cmd, env)
 
     run_id = new_run_id()
     started_at = _utc_now_iso()
@@ -83,9 +130,51 @@ def execute(
             started_at=started_at,
             duration_s=time.monotonic() - start_monotonic,
             exit_code=result.returncode,
+            warnings=run_warnings,
         )
 
     return result.returncode
+
+
+def _env_allowlist_for_plan(plan: ResolvedPlan) -> list[str]:
+    """Pick env-var names that must cross into the sandbox for the
+    chosen runtime to reach its provider.
+
+    Keeps the allowlist plan-driven so the sandbox doesn't leak
+    unrelated env vars. Extended as new runtimes / providers land.
+    """
+    allowlist: list[str] = []
+    src = (plan.auth_source or "").lower()
+    if "anthropic" in src:
+        allowlist.append("ANTHROPIC_API_KEY")
+    if "openai" in src:
+        allowlist.append("OPENAI_API_KEY")
+    if "google" in src or "gemini" in src or "vertex" in src:
+        allowlist.extend(
+            [
+                "GOOGLE_API_KEY",
+                "GEMINI_API_KEY",
+                "GOOGLE_APPLICATION_CREDENTIALS",
+                "GOOGLE_CLOUD_PROJECT",
+                "GOOGLE_CLOUD_LOCATION",
+            ]
+        )
+    # Vertex AI routing vars — ``build_env`` layers these on top when the
+    # resolver picked Vertex. Without the allowlist entries, ``--clearenv``
+    # wipes them and the runtime falls back to direct-API auth inside the
+    # sandbox, breaking the run with a cryptic auth error. PR #17 review.
+    if "vertex" in src:
+        allowlist.extend(
+            [
+                "CLAUDE_CODE_USE_VERTEX",
+                "ANTHROPIC_VERTEX_PROJECT_ID",
+                "GOOGLE_GENAI_USE_VERTEXAI",
+                "VERTEX_PROJECT",
+                "VERTEX_LOCATION",
+                "CLOUD_ML_REGION",
+            ]
+        )
+    return allowlist
 
 
 def _utc_now_iso() -> str:
@@ -101,6 +190,7 @@ def _write_record(
     started_at: str,
     duration_s: float,
     exit_code: int,
+    warnings: list[str],
 ) -> None:
     """Build an ExecutionRecord from the run and persist it.
 
@@ -120,7 +210,7 @@ def _write_record(
         model=plan.model or None,
         exit_code=exit_code,
         outcome=outcome,
-        warnings=list(plan.warnings or []),
+        warnings=list(warnings),
     )
     RecordManager(workdir).write(record)
 
