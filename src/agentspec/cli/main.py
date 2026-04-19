@@ -81,6 +81,21 @@ def run(
         "--unsafe-no-isolation",
         help="Acknowledge running a tight-trust manifest without a sandbox. Required with --via=none on non-permissive manifests. type:bool",
     ),
+    lock: str = typer.Option(
+        "",
+        "--lock",
+        help="Path to an agentspec.lock file. Skips resolve and uses the pinned plan; the manifest's hash must match the lock. type:path",
+    ),
+    require_signed: bool = typer.Option(
+        False,
+        "--require-signed",
+        help="Refuse to run unless --lock is a signed envelope that verifies against --pubkey. Pair with --pubkey <hex>. type:bool",
+    ),
+    pubkey: str = typer.Option(
+        "",
+        "--pubkey",
+        help="Ed25519 public key (hex) to verify --lock against when --require-signed is set. type:string",
+    ),
 ) -> None:
     """Resolve and run an agent from a .agent file or directory."""
     start = time.time()
@@ -97,13 +112,58 @@ def run(
     if output == OutputFormat.json:
         emit_progress("resolve", "running", detail=f"Resolving {manifest.name}")
 
-    try:
-        plan = resolve(manifest, verbose=verbose)
-    except RuntimeError as exc:
-        raise PreconditionError(
-            str(exc),
-            hint="Install a runtime (claude, gemini, codex, ollama) or set API keys",
-        ) from exc
+    if require_signed and not lock:
+        # Silently-ignored flag was a PR #18 round-2 footgun: a user
+        # who passed --require-signed without --lock would expect
+        # "refuse to run anything unverified" and instead get the
+        # normal resolve-and-run path.
+        raise InvalidArgsError(
+            "--require-signed has no effect without --lock",
+            hint="Either pass --lock <path> or drop --require-signed.",
+        )
+
+    if lock:
+        lock_path = Path(lock)
+        if not lock_path.exists():
+            raise NotFoundError(
+                f"Lock not found: {lock}",
+                hint="Create one with: agentspec lock <manifest>",
+            )
+
+        if require_signed:
+            # Strict mode: --require-signed is how a caller says
+            # "fail closed if this lock isn't a verifiable signed
+            # envelope". Without this, `run --lock` trusts the manifest
+            # hash (user-side drift detection) but not the signature
+            # (lock-side tamper detection) — see PR #18 review.
+            if not pubkey:
+                raise InvalidArgsError(
+                    "--require-signed needs --pubkey <hex> to verify against",
+                    hint="Fetch the signer's Ed25519 public key and pass it via --pubkey.",
+                )
+            _validate_ed25519_pubkey(pubkey)
+            if not LockManager.verify(lock_path, pubkey):
+                raise PreconditionError(
+                    f"Lock signature verification failed for {lock}",
+                    hint="Either the lock is unsigned, tampered, or signed by a different key.",
+                )
+
+        lockfile = LockManager.load(lock_path)
+        current_hash = agent_hash(manifest)
+        if current_hash != lockfile.manifest.hash:
+            raise PreconditionError(
+                f"Manifest hash {current_hash} does not match lock's {lockfile.manifest.hash}",
+                hint="Regenerate the lock or roll back the manifest.",
+            )
+        plan = plan_from_lock(lockfile)
+    else:
+        try:
+            plan = resolve(manifest, verbose=verbose)
+        except RuntimeError as exc:
+            raise PreconditionError(
+                str(exc),
+                hint="Install a runtime (claude, gemini, codex, ollama) or set API keys",
+            ) from exc
 
     if dry_run:
         data = {
@@ -887,6 +947,104 @@ def records_verify(
         emit(success_envelope("records.verify", data, version="0.1.0", start_time=start), output)
     else:
         sys.stdout.write(f"{'OK' if valid else 'INVALID'}  {run_id}\n")
+
+    if not valid:
+        raise SystemExit(1)
+
+
+# ── lock / verify-lock ────────────────────────────────────────────────────────
+
+
+@app.command()
+@acli_command(
+    examples=[
+        ("Lock a manifest", "agentspec lock researcher.agent"),
+        ("Custom output path", "agentspec lock researcher.agent --out my.lock"),
+    ],
+    idempotent=True,
+    see_also=["run", "verify-lock"],
+)
+def lock(
+    agent_path: str = typer.Argument(help="Path to .agent file or directory. type:path"),
+    out: str = typer.Option(
+        "", "--out", "-o", help="Output path. Defaults to <agent_path>.lock. type:path"
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.text, "--output", help="Output format. type:enum[text|json|table]"
+    ),
+) -> None:
+    """Pin a manifest's resolved plan to a lockfile.
+
+    Captures runtime, model, tools, auth source, and a sha256 of the
+    system prompt so ``agentspec run --lock`` can reproduce the same
+    setup on another machine (not the same model output — LLMs aren't
+    deterministic).
+    """
+    from agentspec.lock.manager import LockManager
+
+    start = time.time()
+
+    path = Path(agent_path)
+    if not path.exists():
+        raise NotFoundError(f"Agent not found: {agent_path}")
+
+    manifest = load_agent(path)
+    try:
+        plan = resolve(manifest, verbose=False)
+    except RuntimeError as exc:
+        raise PreconditionError(str(exc)) from exc
+
+    lockfile = LockManager.create(manifest, plan)
+    out_path = Path(out) if out else Path(str(path) + ".lock")
+    LockManager.write(lockfile, out_path)
+
+    data = {
+        "path": str(out_path),
+        "manifest_hash": lockfile.manifest.hash,
+        "runtime": lockfile.resolved.runtime,
+        "model": lockfile.resolved.model,
+    }
+    if output == OutputFormat.json:
+        emit(success_envelope("lock", data, version="0.1.0", start_time=start), output)
+    else:
+        sys.stdout.write(
+            f"Locked: {lockfile.manifest.name}@{lockfile.manifest.version} -> "
+            f"{out_path} ({lockfile.resolved.runtime}, {lockfile.resolved.model})\n"
+        )
+
+
+@app.command(name="verify-lock")
+@acli_command(
+    examples=[
+        ("Verify a signed lock", "agentspec verify-lock researcher.agent.lock --pubkey <hex>"),
+        ("JSON output", "agentspec verify-lock researcher.agent.lock --pubkey <hex> --output json"),
+    ],
+    idempotent=True,
+    see_also=["lock", "run"],
+)
+def verify_lock(
+    lock_path: str = typer.Argument(help="Path to an agentspec.lock file. type:path"),
+    pubkey: str = typer.Option(
+        ..., "--pubkey", help="Ed25519 public key (hex) to verify against. type:string"
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.text, "--output", help="Output format. type:enum[text|json|table]"
+    ),
+) -> None:
+    """Verify a signed lockfile against a public key.
+
+    Exits non-zero when verification fails — suitable for CI gating.
+    """
+    from agentspec.lock.manager import LockManager
+
+    start = time.time()
+    valid = LockManager.verify(Path(lock_path), pubkey)
+
+    data = {"path": lock_path, "valid": valid}
+    if output == OutputFormat.json:
+        emit(success_envelope("verify-lock", data, version="0.1.0", start_time=start), output)
+    else:
+        sys.stdout.write(f"{'OK' if valid else 'INVALID'}  {lock_path}\n")
 
     if not valid:
         raise SystemExit(1)

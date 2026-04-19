@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Lockfiles** (`agentspec.lock/v1`). Pin the resolver's output —
+  runtime, model, tools, auth source, sha256 of the system prompt,
+  host info — to a portable JSON artifact so CI / fleet deploys get a
+  deterministic *setup*. (Model *behaviour* still can't be pinned;
+  LLMs aren't deterministic — see
+  `docs/proposals/001-execution-records.md` for why lockfiles promise
+  attestation, not reproducibility.) System-prompt is stored as a
+  hash only, never in full — locks are safe to commit to shared
+  repos. Uses the same Ed25519 envelope shape as signed records and
+  profile memories.
+
+- **`agentspec lock <manifest>`** — create a lockfile from a manifest
+  by resolving once and capturing the plan. Default output path is
+  `<manifest>.lock`; override with `--out`. Signed output via
+  `--sign-key-env VAR` (reads the Ed25519 private key from the named
+  env var so it doesn't land in shell history or `ps aux`).
+
+- **`agentspec verify-lock <lockfile> --pubkey <hex>`** — Ed25519
+  verification with non-zero exit on failure. Suitable for CI
+  gating. Distinguishes "malformed `--pubkey` argument" (operator
+  error, distinct exit path) from `INVALID` (signature mismatch /
+  tampering).
+
+- **`agentspec run <manifest> --lock <lockfile>`** — skip resolve and
+  run against the pinned plan. Fails fast when the manifest's current
+  hash no longer matches the lock's recorded hash, so drift surfaces
+  before the subprocess spawns. Adds `--require-signed --pubkey
+  <hex>`: refuses to run unless the lock is a signed envelope that
+  verifies against the named key — closes the tamper gap where a
+  signed lock with mutated `resolved` fields but unchanged
+  `manifest.hash` would otherwise run. Pair with CI to fail closed.
+
+- **`agentspec.lock` Python module** — `LockFile`, `LockManager`,
+  `plan_from_lock`. 36 new tests across `tests/test_lock.py` and
+  `tests/test_cli_lock.py` covering schema, round-trip unsigned +
+  signed, verify against correct/wrong/tampered/missing/unsigned,
+  plan rehydration, `--require-signed` signature verification on
+  `run --lock`, `--sign-key-env` signed envelope production, and
+  distinct-error paths for malformed / wrong-length keys.
+
 - **Runtime trust enforcement via bubblewrap.** Closes the gap the
   manifest's `trust: {filesystem, network, exec}` block had been
   declarative-only: the runner now wraps the spawned CLI in
