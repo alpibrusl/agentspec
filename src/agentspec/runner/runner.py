@@ -31,6 +31,12 @@ from agentspec.runner.isolation import (
     policy_from_trust,
     select_backend,
 )
+from agentspec.runner.noether_adapter import (
+    UnsupportedByNoetherAdapter,
+    build_noether_argv,
+    find_noether_sandbox,
+    policy_to_noether_json,
+)
 from agentspec.runner.provisioner import provision
 
 log = logging.getLogger(__name__)
@@ -103,6 +109,7 @@ def execute(
         log.warning(warning)
         run_warnings.append(warning)
 
+    policy_tmpfile: Path | None = None
     if backend == IsolationBackend.BWRAP:
         bwrap_path = find_bwrap()
         if bwrap_path is None:  # defensive — select_backend should have caught this
@@ -112,10 +119,9 @@ def execute(
             workdir=workdir,
             extra_env_allowlist=_env_allowlist_for_plan(plan),
         )
-        # Source env values from the enriched ``env`` dict (not os.environ)
-        # so layered routing vars — Vertex AI in particular — reach the
-        # sandboxed runtime after ``--clearenv``. PR #17 review.
-        cmd = build_bwrap_argv(bwrap_path, policy, cmd, env)
+        cmd, policy_tmpfile = _wrap_with_isolation(
+            cmd, env, policy, bwrap_path=bwrap_path, workdir=workdir
+        )
 
     run_id = new_run_id()
     started_at = _utc_now_iso()
@@ -130,7 +136,14 @@ def execute(
     # Surfaced by the v0.5.0 pitch-smoke demo.
     sys.stdout.flush()
     sys.stderr.flush()
-    result = subprocess.run(cmd, env=env, cwd=workdir)
+    try:
+        result = subprocess.run(cmd, env=env, cwd=workdir)
+    finally:
+        if policy_tmpfile is not None:
+            try:
+                policy_tmpfile.unlink()
+            except FileNotFoundError:
+                pass
 
     if emit_record:
         _write_record(
@@ -145,6 +158,59 @@ def execute(
         )
 
     return result.returncode
+
+
+def _wrap_with_isolation(
+    cmd: list[str],
+    env: dict[str, str],
+    policy,
+    *,
+    bwrap_path: str,
+    workdir: Path,
+) -> tuple[list[str], Path | None]:
+    """Render the sandboxed argv, picking the adapter path if opted in.
+
+    ``AGENTSPEC_ISOLATION_BACKEND=noether`` routes through the
+    noether-sandbox binary. Falls back to the direct-bwrap path with a
+    warning if: (a) the binary isn't on PATH, or (b) the policy shape
+    isn't expressible in noether-isolation's schema (multi-rw-bind
+    scoped trust — tracked in noether#39).
+
+    Returns ``(argv, tmpfile_or_none)``. The tmpfile is the written
+    policy JSON path — the caller unlinks it after ``subprocess.run``.
+    """
+    if os.environ.get("AGENTSPEC_ISOLATION_BACKEND") == "noether":
+        noether_bin = find_noether_sandbox()
+        if noether_bin is None:
+            log.warning(
+                "AGENTSPEC_ISOLATION_BACKEND=noether but noether-sandbox "
+                "is not on PATH; falling back to direct-bwrap isolation"
+            )
+        else:
+            try:
+                policy_json = policy_to_noether_json(policy, workdir=workdir)
+            except UnsupportedByNoetherAdapter as e:
+                log.warning(
+                    "noether adapter fallback: %s. Running under direct-bwrap.",
+                    str(e).split(".")[0],
+                )
+            else:
+                import tempfile
+
+                tf = tempfile.NamedTemporaryFile(
+                    mode="w",
+                    suffix=".json",
+                    prefix="agentspec-isolation-",
+                    delete=False,
+                )
+                tf.write(policy_json)
+                tf.close()
+                tmpfile = Path(tf.name)
+                argv = build_noether_argv(noether_bin, cmd, policy_file=tmpfile)
+                return argv, tmpfile
+
+    argv = build_bwrap_argv(bwrap_path, policy, cmd, env)
+    return argv, None
 
 
 def _env_allowlist_for_plan(plan: ResolvedPlan) -> list[str]:
