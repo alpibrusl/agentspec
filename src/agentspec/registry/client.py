@@ -153,15 +153,34 @@ def pull_agent(ref: str, registry_url: str = "") -> AgentManifest | None:
     if not url:
         raise ValueError("No registry URL configured")
 
-    # Try native /v1/agents endpoint first
+    # Try native /v1/agents endpoint first.
+    #
+    # The agentspec-native server returns ``{"hash": "...", "manifest":
+    # {...}}`` — extract the nested manifest directly. Noether-style
+    # registries wrap the response in an ``{"ok", "data": {"result":
+    # {...}}}`` envelope; fall through to those shapes in order. The
+    # previous ``data.get("result", data)`` default tried the whole
+    # response object as a manifest, which fails pydantic validation
+    # against the native server and dropped pulls to the /stages
+    # fallback — which agentspec-native doesn't serve. Surfaced by
+    # the PR #20 end-to-end smoke.
     result = _request("GET", f"{url}/v1/agents/{ref}")
     if result.get("ok") is not False:
         data = result.get("data", result)
-        manifest = data.get("result", data)
-        try:
-            return AgentManifest(**manifest) if isinstance(manifest, dict) else None
-        except Exception:
-            pass
+        manifest_dict: dict[str, Any] | None = None
+        if isinstance(data, dict):
+            if isinstance(data.get("manifest"), dict):
+                manifest_dict = data["manifest"]
+            elif isinstance(data.get("result"), dict):
+                manifest_dict = data["result"]
+            elif "name" in data and "version" in data:
+                # Flat manifest at the top level.
+                manifest_dict = data
+        if manifest_dict is not None:
+            try:
+                return AgentManifest(**manifest_dict)
+            except Exception:
+                pass
 
     # Fall back to /stages wrapping
     result = _request("GET", f"{url}/stages/{ref}")
