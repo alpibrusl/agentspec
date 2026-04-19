@@ -1,9 +1,39 @@
 # Proposal 001 — Execution Records and (Optional) Lockfile
 
-**Status**: draft for discussion, no code
+**Status**: **shipped** — records landed in PR #16 (2026-04-18), lockfiles in PR #18 (2026-04-19).
 **Author**: Alfonso Sastre
-**Date**: 2026-04-18
+**Date**: 2026-04-18 (proposal), 2026-04-19 (both halves shipped)
 **Targets**: v0.5.x
+
+---
+
+## Implementation note (2026-04-19)
+
+Both halves of this proposal are implemented.
+
+- **Records** — `agentspec.records` module, CLI subcommand `records
+  list|show|verify`, automatic emission from `runner.execute()`. See
+  PR #16 and `CHANGELOG.md [Unreleased]`. Opt-in observability fields
+  (`token_usage`, `tool_calls`, `output_digest`) are modelled but not
+  yet populated by any runtime — schema is ready, plumbing lands when
+  we wire specific providers.
+- **Lockfiles** — `agentspec.lock` module, CLI commands `agentspec
+  lock` / `agentspec verify-lock` / `agentspec run --lock`. Same
+  Ed25519 envelope shape as signed records. Manifest-hash mismatch
+  fails fast before subprocess spawns.
+
+Defaults on the eight open questions were accepted without override:
+
+| # | Question | Shipped as |
+|---|---|---|
+| 1 | Lockfile optional or required? | Optional — pure opt-in via `agentspec lock` / `--lock`. |
+| 2 | Record storage: disk-only v1 or registry mirror? | Disk-only (`.agentspec/records/`). Registry mirror deferred. |
+| 3 | Opt-in fields: CLI flags or manifest policy? | Schema modelled; neither wired yet. Punted to when the first runtime produces one. |
+| 4 | `output_digest` semantics? | Schema field only; no runtime populates it in v1. |
+| 5 | Run IDs? | ULID. |
+| 6 | Record retention? | Manual — no auto-prune. |
+| 7 | Keep the name `agentspec.lock`? | Yes. |
+| 8 | Lock schema distinct from ResolvedPlan? | Distinct Pydantic schema; `plan_from_lock` rehydrates as needed.
 
 ---
 
