@@ -71,6 +71,10 @@ print(p, P)
 echo "[1/8] $(green ok) signing keypair generated (pub=${PUB:0:16}…)"
 
 # ── Step 2 — start local registry with multi-tenant auth ─────────────
+# Small race between socket.close() and uvicorn bind — if another
+# process grabs the port in the sub-millisecond window, step 2 fails
+# loudly via the `curl --fail` readiness probe below. Not worth the
+# complexity of parsing uvicorn's "Uvicorn running on" line to avoid.
 PORT=$(python3 -c '
 import socket
 s = socket.socket()
@@ -132,13 +136,26 @@ print(d.get("data", d).get("hash", ""))
 [ -n "$HASH" ] || die "push didn't return a hash: $PUSH_OUT"
 echo "[4/8] $(green ok) pushed as alice → $(dim "$HASH")"
 
-# ── Step 5 — pull anonymously from a fresh workspace ────────────────
+# ── Step 5 — pull demonstrates tenant isolation + public-read aggregation ────
 mkdir -p pull-workdir
 cd pull-workdir
+
+# 5a: bob authenticated — sees only his own tenant (empty), so this
+# MUST 404. Demonstrates cross-tenant isolation on reads.
+set +e
+AGENTSPEC_API_KEY=bob-secret AGENTSPEC_REGISTRY="$REGISTRY_URL" \
+  eval "$AGENTSPEC" pull "$HASH" > /dev/null 2>&1
+bob_exit=$?
+set -e
+[ "$bob_exit" -ne 0 ] \
+  || die "bob's authenticated pull of alice's agent succeeded — tenant isolation broken"
+
+# 5b: anonymous — aggregated across tenants, so the same hash resolves.
 AGENTSPEC_REGISTRY="$REGISTRY_URL" eval "$AGENTSPEC" pull "$HASH" > /dev/null
 [ -f "pitch-smoke.agent" ] \
-  || die "pull didn't produce pitch-smoke.agent (ls: $(ls))"
-echo "[5/8] $(green ok) pulled anonymously (no API key) → $(dim "$(pwd)/pitch-smoke.agent")"
+  || die "anonymous pull didn't produce pitch-smoke.agent (ls: $(ls))"
+echo "[5/8] $(green ok) bob's auth'd pull 404s (isolation); anon pull succeeds (public read)"
+echo "       $(dim "pulled to $(pwd)/pitch-smoke.agent")"
 
 # ── Step 6 — lock the pulled agent, Ed25519-signed ──────────────────
 export AGENTSPEC_LOCK_SIGNING_KEY="$PRIV"
@@ -160,10 +177,11 @@ PYEOF
 echo "[6/8] $(green ok) locked + signed ($(dim '128-char Ed25519 signature')) "
 
 # ── Step 7 — run under bwrap with --require-signed ──────────────────
-RUN_OUT=$(eval "$AGENTSPEC" run pitch-smoke.agent \
+# 30s cap so a hung runtime can't wedge the whole smoke.
+RUN_OUT=$(timeout 30s bash -c "$AGENTSPEC run pitch-smoke.agent \
   --lock pitch-smoke.agent.lock \
-  --require-signed --pubkey "$PUB" \
-  --via bwrap)
+  --require-signed --pubkey $PUB \
+  --via bwrap")
 
 # Grep for the runtime's marker anywhere in the output. The
 # ordering between "Launching…" and the echo line depends on
@@ -204,10 +222,10 @@ data["payload"]["resolved"]["model"] = "attacker/rogue-model"
 with open("pitch-smoke.agent.lock", "w") as f:
     json.dump(data, f)
 PYEOF
-if eval "$AGENTSPEC" run pitch-smoke.agent \
+if timeout 30s bash -c "$AGENTSPEC run pitch-smoke.agent \
     --lock pitch-smoke.agent.lock \
-    --require-signed --pubkey "$PUB" \
-    --via bwrap > /dev/null 2>&1; then
+    --require-signed --pubkey $PUB \
+    --via bwrap" > /dev/null 2>&1; then
   die "tampered lock accepted — signature check didn't fire!"
 fi
 echo "       $(dim 'tamper check: run refused tampered lock ✓')"

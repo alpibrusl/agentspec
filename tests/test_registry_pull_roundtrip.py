@@ -130,3 +130,119 @@ def test_pull_missing_hash_returns_none(live_server):
     """Pulling a hash that doesn't exist must return None (the CLI
     layer turns that into a NotFoundError)."""
     assert pull_agent("ag1:aaaaaaaaaaaaaaaa", live_server) is None
+
+
+# ── Response-shape parsing: legacy / Noether compatibility ────────────────────
+
+
+def test_pull_parses_noether_envelope_shape(monkeypatch):
+    """PR #20 review asked for coverage of the Noether response shape —
+    `{"ok": true, "data": {"result": {...manifest...}}}` — that the
+    client's three-way parser still supports for downstream Noether
+    registries. Mocks ``_request`` directly so we pin the wire contract
+    without needing a Noether server stood up."""
+    import agentspec.registry.client as client_mod
+
+    def _fake_noether_request(method, url, data=None):
+        assert method == "GET" and "/v1/agents/" in url
+        return {
+            "ok": True,
+            "data": {
+                "result": {
+                    "name": "noether-shape-agent",
+                    "version": "0.3.0",
+                    "apiVersion": "agent/v1",
+                },
+            },
+        }
+
+    monkeypatch.setattr(client_mod, "_request", _fake_noether_request)
+    pulled = pull_agent("ag1:deadbeef", "http://mock")
+    assert pulled is not None
+    assert pulled.name == "noether-shape-agent"
+    assert pulled.version == "0.3.0"
+
+
+def test_pull_parses_flat_manifest_shape(monkeypatch):
+    """Last-resort fallback: some registries may return the manifest
+    flat at the top level (no envelope, no nested ``manifest``/``result``
+    key). The client detects this via the presence of ``name`` +
+    ``version`` on the top-level dict and parses it directly."""
+    import agentspec.registry.client as client_mod
+
+    def _fake_flat_request(method, url, data=None):
+        assert method == "GET" and "/v1/agents/" in url
+        return {
+            "name": "flat-shape-agent",
+            "version": "0.4.0",
+            "apiVersion": "agent/v1",
+        }
+
+    monkeypatch.setattr(client_mod, "_request", _fake_flat_request)
+    pulled = pull_agent("ag1:deadbeef", "http://mock")
+    assert pulled is not None
+    assert pulled.name == "flat-shape-agent"
+    assert pulled.version == "0.4.0"
+
+
+# ── Multi-tenant public-read aggregation ──────────────────────────────────────
+
+
+def test_pull_anonymous_aggregates_across_multiple_tenants(monkeypatch, tmp_path):
+    """PR #20 review: the single-tenant anonymous-pull test proved
+    "anonymous read works" but not the stronger claim that anonymous
+    reads **aggregate across tenants**. Set up a real multi-tenant
+    server, have alice and bob each push an agent, then pull both
+    anonymously from a third tenant-less context."""
+    monkeypatch.delenv(server.API_KEY_ENV, raising=False)
+    monkeypatch.setenv(server.API_KEYS_ENV, "alice:alice-key,bob:bob-key")
+    monkeypatch.setenv("AGENTSPEC_REGISTRY_DIR", str(tmp_path / "multi-tenant-registry"))
+
+    from agentspec.registry.storage import RegistryStorage
+
+    server.storage = RegistryStorage()
+    client = TestClient(server.app)
+
+    def _req(method, url, data=None, api_key=None):
+        import urllib.parse
+
+        parsed = urllib.parse.urlparse(url)
+        path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+        headers = {"X-API-Key": api_key} if api_key else {}
+        if method == "POST":
+            r = client.post(path, json=data, headers=headers)
+        else:
+            r = client.get(path, headers=headers)
+        if 200 <= r.status_code < 300:
+            return r.json()
+        return {"ok": False, "error": {"code": str(r.status_code), "message": r.text}}
+
+    import agentspec.registry.client as client_mod
+
+    # Alice pushes her agent.
+    monkeypatch.setattr(
+        client_mod, "_request", lambda m, u, data=None: _req(m, u, data, "alice-key")
+    )
+    alice_hash = push_agent(
+        AgentManifest(name="alice-agent", version="0.1.0"), "http://mock"
+    )["hash"]
+
+    # Bob pushes a different agent under his tenant.
+    monkeypatch.setattr(
+        client_mod, "_request", lambda m, u, data=None: _req(m, u, data, "bob-key")
+    )
+    bob_hash = push_agent(
+        AgentManifest(name="bob-agent", version="0.1.0"), "http://mock"
+    )["hash"]
+
+    # Anonymous pulls (no API key) must see BOTH tenants' agents.
+    monkeypatch.setattr(
+        client_mod, "_request", lambda m, u, data=None: _req(m, u, data, None)
+    )
+    alice_pulled = pull_agent(alice_hash, "http://mock")
+    bob_pulled = pull_agent(bob_hash, "http://mock")
+
+    assert alice_pulled is not None, "anonymous pull of alice's agent failed"
+    assert alice_pulled.name == "alice-agent"
+    assert bob_pulled is not None, "anonymous pull of bob's agent failed"
+    assert bob_pulled.name == "bob-agent"
