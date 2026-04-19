@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentspec-alpibru"
-version = "0.4.1"
+version = "0.5.0"
 description = "Trust-restricting inheritance and runtime resolver for AI agent manifests. Multi-runtime: Claude, Gemini, Codex, Ollama, and more. (Import as `agentspec`.)"
 readme = "README.md"
 license = "EUPL-1.2"
