@@ -14,3 +14,4 @@ htmlcov/
 site/
 *.agent.bak
 registry/agents/
+.agentspec/

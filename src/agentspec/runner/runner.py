@@ -10,10 +10,9 @@ identity, rules, skill instructions, and tool registrations natively.
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
-import sys
-import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,7 +23,16 @@ from agentspec.records.manager import RecordManager, new_run_id
 from agentspec.records.models import ExecutionRecord
 from agentspec.resolver.resolver import ResolvedPlan
 from agentspec.resolver.vertex import detect_vertex_ai, vertex_env_for_runtime
+from agentspec.runner.isolation import (
+    IsolationBackend,
+    build_bwrap_argv,
+    find_bwrap,
+    policy_from_trust,
+    select_backend,
+)
 from agentspec.runner.provisioner import provision
+
+log = logging.getLogger(__name__)
 
 
 # Runtime → command builder
@@ -55,6 +63,8 @@ def execute(
     workdir: Path | None = None,
     *,
     emit_record: bool = True,
+    via: str | None = None,
+    unsafe_no_isolation: bool = False,
 ) -> int:
     """Execute the agent by spawning the resolved runtime.
 
@@ -62,11 +72,40 @@ def execute(
     spawning. When *emit_record* is True (the default), writes a signed
     or unsigned execution record under
     ``{workdir}/.agentspec/records/<run-id>.json`` describing what ran.
+
+    Isolation:
+
+    - ``via=None`` / ``"auto"`` auto-detects bubblewrap on PATH. If
+      present, the subprocess is wrapped in bwrap with a policy derived
+      from ``manifest.trust``. If absent, a manifest with non-trivial
+      trust raises; a fully permissive manifest runs unsandboxed with
+      a warning (matches the v0.4.x behaviour).
+    - ``via="bwrap"`` requires bwrap and fails fast if missing.
+    - ``via="none"`` explicitly skips isolation. With non-trivial
+      trust this raises unless ``unsafe_no_isolation=True``.
     """
     workdir = workdir or Path.cwd()
     provision(plan, manifest, workdir)
     cmd = build_command(plan, manifest, input_text)
     env = build_env(plan)
+
+    backend, warning = select_backend(
+        manifest.trust, requested=via, allow_unsafe=unsafe_no_isolation
+    )
+    if warning:
+        log.warning(warning)
+        plan.warnings = list(plan.warnings or []) + [warning]
+
+    if backend == IsolationBackend.BWRAP:
+        bwrap_path = find_bwrap()
+        if bwrap_path is None:  # defensive — select_backend should have caught this
+            raise RuntimeError("bwrap backend selected but binary not found")
+        policy = policy_from_trust(
+            manifest.trust,
+            workdir=workdir,
+            extra_env_allowlist=_env_allowlist_for_plan(plan),
+        )
+        cmd = build_bwrap_argv(bwrap_path, policy, cmd)
 
     run_id = new_run_id()
     started_at = _utc_now_iso()
@@ -86,6 +125,32 @@ def execute(
         )
 
     return result.returncode
+
+
+def _env_allowlist_for_plan(plan: ResolvedPlan) -> list[str]:
+    """Pick env-var names that must cross into the sandbox for the
+    chosen runtime to reach its provider.
+
+    Keeps the allowlist plan-driven so the sandbox doesn't leak
+    unrelated env vars. Extended as new runtimes / providers land.
+    """
+    allowlist: list[str] = []
+    src = (plan.auth_source or "").lower()
+    if "anthropic" in src:
+        allowlist.append("ANTHROPIC_API_KEY")
+    if "openai" in src:
+        allowlist.append("OPENAI_API_KEY")
+    if "google" in src or "gemini" in src or "vertex" in src:
+        allowlist.extend(
+            [
+                "GOOGLE_API_KEY",
+                "GEMINI_API_KEY",
+                "GOOGLE_APPLICATION_CREDENTIALS",
+                "GOOGLE_CLOUD_PROJECT",
+                "GOOGLE_CLOUD_LOCATION",
+            ]
+        )
+    return allowlist
 
 
 def _utc_now_iso() -> str:

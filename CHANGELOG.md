@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Runtime trust enforcement via bubblewrap.** Closes the gap the
+  manifest's `trust: {filesystem, network, exec}` block had been
+  declarative-only: the runner now wraps the spawned CLI in
+  `bwrap` with a policy derived from `TrustSpec`. Fresh namespaces,
+  cap-drop, `--die-with-parent`, workdir-only RW default, network
+  gated by `trust.network`. See `docs/proposals/002-trust-enforcement-via-noether.md`
+  for the design and why this ships as direct-bwrap instead of
+  delegating to noether today (spoiler:
+  [noether#36](https://github.com/alpibrusl/noether/issues/36)).
+
+- **`agentspec run --via auto|bwrap|none`** plus
+  `--unsafe-no-isolation` and `AGENTSPEC_ISOLATION` env fallback.
+  `auto` (default) uses bwrap when installed, falls back on
+  permissive manifests with a warning, **fails on tight manifests**
+  when bwrap is missing (no silent downgrade).
+
+- **`agentspec.runner.isolation` module.** `IsolationPolicy`
+  dataclass, `policy_from_trust`, `select_backend`, `build_bwrap_argv`,
+  `find_bwrap`, `is_tight_trust`. Decoupled from the renderer so a
+  native-namespaces backend can consume the same policy later.
+
+- **44 new tests** across `tests/test_isolation.py` (mapping +
+  selection + argv rendering), `tests/test_runner_isolation.py`
+  (runner integration with mocked bwrap and subprocess), and
+  `tests/test_cli_isolation.py` (CLI flag parsing + env fallback).
+
 - **Execution records.** Every `agentspec run` now writes a tamper-evident
   log to `{workdir}/.agentspec/records/<run-id>.json` capturing manifest
   hash, runtime, timing, exit code, and outcome. Never captures prompt

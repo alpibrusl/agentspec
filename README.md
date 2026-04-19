@@ -250,7 +250,23 @@ agentspec --help              # structured help
 | `search` | Semantic search for agents in a remote registry |
 | `schema` | Print the JSON Schema for `.agent` files |
 | `gym run` | Run an agent against task fixtures / corpora |
+| `records list / show / verify` | Inspect and verify signed execution records |
 | `introspect` | ACLI command tree as JSON (for agent discovery) |
+
+---
+
+## Runtime isolation
+
+`agentspec run` wraps the spawned CLI in `bwrap` (bubblewrap) when it's available on `PATH`, deriving a sandbox policy from the manifest's `trust` block. Fresh namespaces, cap-drop, workdir-only RW by default; network is gated by `trust.network`.
+
+```bash
+agentspec run my.agent                           # --via=auto: use bwrap if installed
+agentspec run my.agent --via=bwrap               # require bwrap; fail if missing
+agentspec run my.agent --via=none --unsafe-no-isolation   # explicit opt-out
+export AGENTSPEC_ISOLATION=none                   # env fallback
+```
+
+A manifest with non-trivial trust (anything other than `{full, allowed, full}`) **fails** when bwrap is missing — no silent downgrade. Permissive manifests still run unsandboxed with a warning. See [SECURITY.md](./SECURITY.md) for the full threat model and [`docs/proposals/002-trust-enforcement-via-noether.md`](./docs/proposals/002-trust-enforcement-via-noether.md) for the design.
 
 ---
 

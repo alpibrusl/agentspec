@@ -1,10 +1,31 @@
 # Proposal 002 — Trust Enforcement via Noether Delegation
 
-**Status**: draft for discussion, no code
+**Status**: Phase 1 shipped as direct bubblewrap; noether delegation deferred.
 **Author**: Alfonso Sastre
-**Date**: 2026-04-18
-**Targets**: v0.6.x
-**Depends on**: [noether v0.7 stage isolation](https://github.com/alpibrusl/noether/blob/main/docs/roadmap/2026-04-18-stage-isolation.md)
+**Date**: 2026-04-18 (proposal), 2026-04-19 (Phase 1 shipped)
+**Targets**: v0.6.x (Phase 1 — direct bwrap), v0.8.x (Phase 2 — delegate to noether when available)
+**Depends on**: bubblewrap binary on `PATH` today; noether [issue #36](https://github.com/alpibrusl/noether/issues/36) for eventual delegation
+
+---
+
+## Implementation note (2026-04-19)
+
+The proposal below is the **aspirational** design — agentspec delegates
+runtime isolation to noether. Verification against noether on 2026-04-19
+surfaced a gap: `noether run` only executes Lagrange composition graphs,
+not arbitrary external commands. Wrapping a runtime CLI via the
+`spawn_process` stdlib stage is technically possible but couples agentspec
+tightly to noether's graph schema and adds per-runtime integration code.
+
+Phase 1 therefore ships as **direct bubblewrap wrapping in agentspec**,
+ported from the same design noether PR #34 uses for stage isolation. The
+`IsolationPolicy` layer is deliberately decoupled from the rendering step
+so a future `NoetherAdapter` becomes a drop-in replacement once noether
+exposes an appropriate interface (tracked in
+[noether#36](https://github.com/alpibrusl/noether/issues/36)).
+
+The rest of this document — trust → effect mapping, CLI surface,
+degradation, open questions — applies to both Phase 1 and Phase 2.
 
 ---
 
