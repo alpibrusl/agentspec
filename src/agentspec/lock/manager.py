@@ -89,7 +89,13 @@ class LockManager:
                 model=plan.model or "",
                 tools=list(plan.tools or []),
                 auth_source=plan.auth_source,
-                system_prompt_hash=_system_prompt_hash(plan.system_prompt or ""),
+                # No ``or ""`` — PR #18 round-2 review caught the
+                # half-fix where the helper raised on None but the
+                # caller silently coerced. None reaching this line is a
+                # programmer error (ResolvedPlan defaults system_prompt
+                # to "" but it's unenforced) and should surface loudly
+                # rather than silently producing sha256("").
+                system_prompt_hash=_system_prompt_hash(plan.system_prompt),
             ),
             host=LockedHost(
                 os=_host_string(),

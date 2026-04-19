@@ -47,6 +47,10 @@ def fake_runtime(monkeypatch):
             decisions=[],
         )
 
+    # Pin bwrap absence so these lock-focused tests don't vary between
+    # hosts that have bwrap and hosts that don't. Isolation has its own
+    # test file; here we only care about the lock path through the CLI.
+    monkeypatch.setattr("shutil.which", lambda name: None)
     monkeypatch.setattr(cli, "resolve", _fake_resolve)
     monkeypatch.setattr(runner_mod, "provision", lambda plan, manifest, workdir: None)
     monkeypatch.setattr(runner_mod.subprocess, "run", _fake_run)
@@ -55,12 +59,19 @@ def fake_runtime(monkeypatch):
 
 @pytest.fixture
 def agent_file(tmp_path):
+    # Permissive trust so these lock-focused tests don't trip isolation
+    # gating when the host / CI runner has no bwrap on PATH. Isolation
+    # coverage lives in test_cli_isolation.py.
     p = tmp_path / "a.agent"
     p.write_text(
         "apiVersion: agent/v1\n"
         "name: lock-cli-test\n"
         "version: 0.1.0\n"
         "runtime: claude-code\n"
+        "trust:\n"
+        "  filesystem: full\n"
+        "  network: allowed\n"
+        "  exec: full\n"
     )
     return p
 
@@ -346,3 +357,101 @@ def test_verify_lock_malformed_pubkey_is_precondition_error(
     # Message should not say "INVALID" alone — that conflates with real
     # signature failures.
     assert "INVALID" not in result.stdout or "pubkey" in result.stdout.lower()
+
+
+# ── PR #18 round-2 review polish ──────────────────────────────────────────────
+
+
+def test_verify_lock_short_pubkey_is_operator_error(
+    cli_runner, fake_runtime, agent_file, tmp_path
+):
+    """Round-2 review: `bytes.fromhex("ab")` succeeds (2 bytes) but
+    fails inside VerifyKey as an internal ValueError → reported as
+    INVALID, indistinguishable from tampering. Length check up front
+    now makes truncated-paste distinct from real signature mismatch."""
+    from agentspec.lock.manager import LockManager
+    from agentspec.parser.loader import load_agent
+    from agentspec.profile.signing import generate_keypair
+
+    priv, _ = generate_keypair()
+    lock = LockManager.create(
+        load_agent(agent_file), cli.resolve(load_agent(agent_file))
+    )
+    lock_path = tmp_path / "x.lock"
+    LockManager.write(lock, lock_path, private_key=priv)
+
+    # 2-byte hex is "valid hex" but wrong length.
+    result = cli_runner.invoke(
+        cli.app.typer_app,
+        ["verify-lock", str(lock_path), "--pubkey", "ab"],
+    )
+    assert result.exit_code != 0
+    # Not INVALID — that's reserved for actual signature mismatches.
+    assert "INVALID" not in result.stdout
+
+
+def test_lock_sign_key_env_garbage_is_operator_error(
+    cli_runner, fake_runtime, agent_file, tmp_path, monkeypatch
+):
+    """Round-2 review: garbage in the --sign-key-env env var used to
+    surface as an ugly PyNaCl traceback. Validate at the CLI boundary
+    so the user gets a clean error pointing at their env var."""
+    monkeypatch.setenv("AGENTSPEC_LOCK_SIGNING_KEY", "not-hex-at-all")
+
+    out = tmp_path / "signed.lock"
+    result = cli_runner.invoke(
+        cli.app.typer_app,
+        [
+            "lock",
+            str(agent_file),
+            "--out",
+            str(out),
+            "--sign-key-env",
+            "AGENTSPEC_LOCK_SIGNING_KEY",
+        ],
+    )
+    assert result.exit_code != 0
+    # Clean error surface — should not have dumped a traceback.
+    assert not out.exists()
+
+
+def test_lock_sign_key_env_wrong_length_is_operator_error(
+    cli_runner, fake_runtime, agent_file, tmp_path, monkeypatch
+):
+    """Round-2 review: wrong-length hex (valid chars, wrong byte count)
+    must fail with a pointer to the operator, not a cryptic PyNaCl
+    error."""
+    monkeypatch.setenv("AGENTSPEC_LOCK_SIGNING_KEY", "abab")  # 2 bytes
+
+    out = tmp_path / "signed.lock"
+    result = cli_runner.invoke(
+        cli.app.typer_app,
+        [
+            "lock",
+            str(agent_file),
+            "--out",
+            str(out),
+            "--sign-key-env",
+            "AGENTSPEC_LOCK_SIGNING_KEY",
+        ],
+    )
+    assert result.exit_code != 0
+    assert not out.exists()
+
+
+def test_run_require_signed_without_lock_is_operator_error(
+    cli_runner, fake_runtime, agent_file
+):
+    """Round-2 review: `--require-signed` without `--lock` used to be
+    silently ignored (user thought they were refusing unsigned runs;
+    actually got the normal resolve path). Explicit error closes the
+    loop."""
+    from agentspec.profile.signing import generate_keypair
+
+    _, pub = generate_keypair()
+    result = cli_runner.invoke(
+        cli.app.typer_app,
+        ["run", str(agent_file), "--require-signed", "--pubkey", pub],
+    )
+    assert result.exit_code != 0
+    assert fake_runtime == []  # never spawned

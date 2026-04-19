@@ -237,6 +237,17 @@ def test_system_prompt_hash_rejects_none():
         _system_prompt_hash(None)  # type: ignore[arg-type]
 
 
+def test_lockmanager_create_rejects_plan_with_none_system_prompt():
+    """PR #18 round-2 caught a half-fix: helper raised on None but
+    ``LockManager.create`` coerced via ``plan.system_prompt or ""``
+    and silently produced sha256("") anyway. Full fix: the coercion
+    is gone, so None at the call site raises too."""
+    plan = _plan()
+    plan.system_prompt = None  # type: ignore[assignment]
+    with pytest.raises((AttributeError, TypeError)):
+        LockManager.create(_manifest(), plan)
+
+
 def test_lockfile_schema_excludes_schema_only_fields():
     """PR #18 review: ``runtime_version`` and ``mcp_servers`` were
     declared on LockedResolved but never populated — every emitted lock

@@ -37,10 +37,47 @@ from acli import (
     PreconditionError,
 )
 
+from agentspec.lock.manager import LockManager, plan_from_lock
 from agentspec.parser.loader import load_agent, agent_hash, export_schema
 from agentspec.parser.manifest import AgentManifest
 from agentspec.resolver.resolver import resolve, ResolvedPlan
 from agentspec.runner.runner import execute, build_command
+
+
+# Ed25519 keys are exactly 32 bytes. Validating both ``bytes.fromhex``
+# (correctness of the hex string) and length (correctness of the key)
+# means the "I pasted half my key" footgun reports as an operator error
+# instead of conflating with a tampered-signature "INVALID" result —
+# PR #18 round-2 review quibble.
+_ED25519_KEY_BYTES = 32
+
+
+def _validate_ed25519_hex(value: str, *, flag: str) -> bytes:
+    """Parse a hex string as an Ed25519 key. Raise ``InvalidArgsError``
+    with a CLI-useful hint on malformed hex or wrong length.
+
+    Returns the decoded bytes so callers can reuse them when desired;
+    ignoring the return value is fine — the side effect of rejection
+    is the point.
+    """
+    try:
+        raw = bytes.fromhex(value)
+    except ValueError as exc:
+        raise InvalidArgsError(
+            f"{flag} is not valid hex: {exc}",
+            hint=f"Pass the {_ED25519_KEY_BYTES * 2}-char hex representation of an Ed25519 key.",
+        ) from exc
+    if len(raw) != _ED25519_KEY_BYTES:
+        raise InvalidArgsError(
+            f"{flag} decodes to {len(raw)} bytes; Ed25519 keys are {_ED25519_KEY_BYTES} bytes",
+            hint=f"Check for a truncated paste — the value must be exactly {_ED25519_KEY_BYTES * 2} hex chars.",
+        )
+    return raw
+
+
+def _validate_ed25519_pubkey(value: str) -> bytes:
+    return _validate_ed25519_hex(value, flag="--pubkey")
+
 
 app = ACLIApp(
     name="agentspec",
@@ -960,6 +997,10 @@ def records_verify(
     examples=[
         ("Lock a manifest", "agentspec lock researcher.agent"),
         ("Custom output path", "agentspec lock researcher.agent --out my.lock"),
+        (
+            "Signed lock via env-held key",
+            "AGENTSPEC_LOCK_SIGNING_KEY=<hex> agentspec lock researcher.agent --sign-key-env AGENTSPEC_LOCK_SIGNING_KEY",
+        ),
     ],
     idempotent=True,
     see_also=["run", "verify-lock"],
@@ -968,6 +1009,11 @@ def lock(
     agent_path: str = typer.Argument(help="Path to .agent file or directory. type:path"),
     out: str = typer.Option(
         "", "--out", "-o", help="Output path. Defaults to <agent_path>.lock. type:path"
+    ),
+    sign_key_env: str = typer.Option(
+        "",
+        "--sign-key-env",
+        help="Name of an env var holding the Ed25519 private key (hex). When set, writes a signed envelope instead of plain JSON. type:string",
     ),
     output: OutputFormat = typer.Option(
         OutputFormat.text, "--output", help="Output format. type:enum[text|json|table]"
@@ -979,9 +1025,11 @@ def lock(
     system prompt so ``agentspec run --lock`` can reproduce the same
     setup on another machine (not the same model output — LLMs aren't
     deterministic).
-    """
-    from agentspec.lock.manager import LockManager
 
+    Signing is opt-in via ``--sign-key-env VAR``. The key is read from
+    the named env var so it doesn't land in shell history / process
+    lists the way ``--sign-key <hex>`` would.
+    """
     start = time.time()
 
     path = Path(agent_path)
@@ -994,21 +1042,37 @@ def lock(
     except RuntimeError as exc:
         raise PreconditionError(str(exc)) from exc
 
+    private_key: str | None = None
+    if sign_key_env:
+        private_key = os.environ.get(sign_key_env)
+        if not private_key:
+            raise InvalidArgsError(
+                f"--sign-key-env={sign_key_env} but that env var is unset",
+                hint="Export the private key before running, or omit --sign-key-env to write an unsigned lock.",
+            )
+        # PR #18 round-2 review: garbage in the env var used to surface
+        # as an ugly traceback deep in PyNaCl. Validate at the CLI
+        # boundary so the user gets a clean error with a pointer to
+        # what's wrong.
+        _validate_ed25519_hex(private_key, flag=f"--sign-key-env={sign_key_env}")
+
     lockfile = LockManager.create(manifest, plan)
     out_path = Path(out) if out else Path(str(path) + ".lock")
-    LockManager.write(lockfile, out_path)
+    LockManager.write(lockfile, out_path, private_key=private_key)
 
     data = {
         "path": str(out_path),
         "manifest_hash": lockfile.manifest.hash,
         "runtime": lockfile.resolved.runtime,
         "model": lockfile.resolved.model,
+        "signed": private_key is not None,
     }
     if output == OutputFormat.json:
         emit(success_envelope("lock", data, version="0.1.0", start_time=start), output)
     else:
+        signed_tag = " (signed)" if private_key else ""
         sys.stdout.write(
-            f"Locked: {lockfile.manifest.name}@{lockfile.manifest.version} -> "
+            f"Locked{signed_tag}: {lockfile.manifest.name}@{lockfile.manifest.version} -> "
             f"{out_path} ({lockfile.resolved.runtime}, {lockfile.resolved.model})\n"
         )
 
@@ -1034,11 +1098,23 @@ def verify_lock(
     """Verify a signed lockfile against a public key.
 
     Exits non-zero when verification fails — suitable for CI gating.
+    ``INVALID`` specifically means "signature didn't check out";
+    malformed arguments (bad hex, missing file) raise distinct errors
+    so callers can tell "tampered lock" from "operator typo".
     """
-    from agentspec.lock.manager import LockManager
-
     start = time.time()
-    valid = LockManager.verify(Path(lock_path), pubkey)
+
+    # Validate --pubkey up front so "bad hex in argument" and
+    # "wrong-length paste" are distinct from "valid key, invalid
+    # signature" — only the last is a tampering signal; the others are
+    # operator errors. PR #18 rounds 1 and 2 both called this out.
+    _validate_ed25519_pubkey(pubkey)
+
+    p = Path(lock_path)
+    if not p.exists():
+        raise NotFoundError(f"Lock not found: {lock_path}")
+
+    valid = LockManager.verify(p, pubkey)
 
     data = {"path": lock_path, "valid": valid}
     if output == OutputFormat.json:
