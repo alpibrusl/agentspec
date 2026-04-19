@@ -1,31 +1,85 @@
 # Proposal 002 — Trust Enforcement via Noether Delegation
 
-**Status**: Phase 1 shipped as direct bubblewrap; noether delegation deferred.
+**Status**: Phase 1 shipped as direct bubblewrap ([#17](https://github.com/alpibrusl/agentspec/pull/17)); Phase 2 path set to `noether-isolation` library export.
 **Author**: Alfonso Sastre
-**Date**: 2026-04-18 (proposal), 2026-04-19 (Phase 1 shipped)
-**Targets**: v0.6.x (Phase 1 — direct bwrap), v0.8.x (Phase 2 — delegate to noether when available)
-**Depends on**: bubblewrap binary on `PATH` today; noether [issue #36](https://github.com/alpibrusl/noether/issues/36) for eventual delegation
+**Date**: 2026-04-18 (proposal), 2026-04-19 (Phase 1 shipped + Phase 2 direction set after [noether#36](https://github.com/alpibrusl/noether/issues/36))
+**Targets**: v0.6.x (Phase 1 — direct bubblewrap), v0.7.x (Phase 2 — `noether-isolation` adapter)
+**Depends on**: bubblewrap (`bwrap`) on `PATH` today; [`noether-isolation`](https://github.com/alpibrusl/noether/issues/36) crate for Phase 2
 
 ---
 
-## Implementation note (2026-04-19)
+## Status (2026-04-19)
 
-The proposal below is the **aspirational** design — agentspec delegates
-runtime isolation to noether. Verification against noether on 2026-04-19
-surfaced a gap: `noether run` only executes Lagrange composition graphs,
-not arbitrary external commands. Wrapping a runtime CLI via the
-`spawn_process` stdlib stage is technically possible but couples agentspec
-tightly to noether's graph schema and adds per-runtime integration code.
+### Phase 1 — shipped as direct bubblewrap
 
-Phase 1 therefore ships as **direct bubblewrap wrapping in agentspec**,
-ported from the same design noether PR #34 uses for stage isolation. The
-`IsolationPolicy` layer is deliberately decoupled from the rendering step
-so a future `NoetherAdapter` becomes a drop-in replacement once noether
-exposes an appropriate interface (tracked in
-[noether#36](https://github.com/alpibrusl/noether/issues/36)).
+Verification against noether on 2026-04-19 surfaced a gap: `noether
+run` only executes Lagrange composition graphs, not arbitrary external
+commands. Wrapping a runtime CLI via the `spawn_process` stdlib stage
+is technically possible but couples agentspec tightly to noether's
+graph schema and adds per-runtime integration code.
 
-The rest of this document — trust → effect mapping, CLI surface,
-degradation, open questions — applies to both Phase 1 and Phase 2.
+Phase 1 therefore ships as **direct bubblewrap wrapping in agentspec**
+([PR #17](https://github.com/alpibrusl/agentspec/pull/17)), ported
+from the same design noether's PR #34 uses for stage isolation. The
+`IsolationPolicy` layer is deliberately decoupled from the rendering
+step so a future adapter can replace the renderer without touching
+the mapping.
+
+### Phase 2 — `noether-isolation` library export
+
+After discussion on [noether#36](https://github.com/alpibrusl/noether/issues/36),
+the delegation path for Phase 2 is **library export**, not a new
+`noether` CLI subcommand.
+
+- Noether's maintainer pushed back on `noether run-external`: it
+  would muddy the "verified composition platform" identity. Users
+  would reasonably expect traces, content addressing, registry
+  entries, and `noether trace <id>` replay to work; we'd be
+  committing to building those or explaining why a Noether command
+  intentionally doesn't have them. The `--effects '{...}'` JSON blob
+  was also flagged as a code smell (real flags or don't ship the CLI
+  form).
+- Agreed path: when noether's PR #34 merges, the
+  `crates/noether-engine/src/executor/isolation.rs` module is
+  extracted into a standalone **`noether-isolation`** crate plus a
+  thin **`noether-sandbox`** binary that takes an effect spec and
+  argv on stdin and execs under bubblewrap. Targeting noether
+  v0.7.1.
+- AgentSpec's Python runner calls `noether-sandbox` the same way it
+  currently calls `bwrap` — ~20 lines to change in
+  `build_bwrap_argv`. The existing `IsolationPolicy` layer is shaped
+  for exactly this: Phase 2 becomes a `NoetherIsolationAdapter`
+  renderer alongside (eventually replacing) the direct-bwrap
+  renderer.
+- Vocabulary mapping stays in agentspec: `trust → EffectSet →
+  IsolationPolicy`. Noether owns the policy *mechanism*; agentspec
+  owns the *mapping*; and that boundary is right.
+
+Install-friction options for the Phase 2 rollout (all tractable,
+none blocking):
+
+1. **Preferred**: `pip install agentspec[noether-isolation]` extra
+   pulls `noether-sandbox` as a binary dependency. The extra name
+   tells users they're opting into the Rust audit surface
+   (`noether-sandbox` is written in Rust, so security auditors
+   should review the `noether-isolation` crate alongside agentspec).
+2. `maturin` / `cibuildwheel` bundles `noether-sandbox` into the
+   agentspec wheel per-platform. Self-contained but CI-expensive.
+3. Separate install (`cargo install noether-sandbox`), agentspec
+   auto-detects the same way it detects `bwrap` today.
+
+When `noether-isolation` is released, we add the adapter and either
+default to it when available or make it opt-in — deferring that
+choice to the migration PR. During the transition, `--via=bwrap`
+keeps working; the adapter is additive, not a replacement on day
+one.
+
+### What the rest of this document covers
+
+The `trust → effect` mapping, CLI surface, degradation behaviour,
+and open questions below apply to both Phase 1 and Phase 2 — the
+adapter swap is a renderer change, not a schema change, so
+everything downstream stays valid.
 
 ---
 
@@ -208,10 +262,9 @@ One gotcha: when MCP servers are installed via `provision_install()` (pip/npm/ca
 ## Rollout
 
 - **v0.5.x** (concurrent): records from Proposal 001 land. No isolation yet.
-- **v0.6.0**: ship `agentspec.runner.isolation` module with the mapping table. Add `--via noether` CLI flag (opt-in only). Docs describe the setup.
-- **v0.6.x**: auto-detect becomes default behaviour for manifests with declared constraints. Permissive manifests still use legacy path.
-- **v0.7.0**: auto-detect becomes default for all manifests. `--unsafe-no-isolation` remains available for opt-out.
-- **v0.8.0** (when noether ships native backend): agentspec gets it transparently. No agentspec changes required.
+- **v0.6.0** (Phase 1): ship `agentspec.runner.isolation` with direct bwrap rendering. `--via auto|bwrap|none` CLI flag, `--unsafe-no-isolation` opt-out, `AGENTSPEC_ISOLATION` env fallback. Manifests with tight trust fail closed when bwrap is missing; permissive manifests warn.
+- **v0.7.x** (Phase 2): add `NoetherIsolationAdapter` as a second renderer behind the same `IsolationPolicy` layer. Ships after noether v0.7.1 exposes the `noether-isolation` crate + `noether-sandbox` binary per [noether#36](https://github.com/alpibrusl/noether/issues/36). Default backend choice (direct vs adapter) deferred to the migration PR — likely adapter-preferred with direct as a fallback.
+- **v0.8.x**: when noether's Phase 2 native backend (namespaces + Landlock + seccomp, no external binary) lands upstream, agentspec picks it up transparently via the adapter. No agentspec changes required.
 
 ## Alternatives considered
 
