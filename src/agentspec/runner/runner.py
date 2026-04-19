@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -47,6 +48,7 @@ def build_command(plan: ResolvedPlan, manifest: AgentManifest, input_text: str |
         "goose": _build_goose_cmd,
         "aider": _build_aider_cmd,
         "ollama": _build_ollama_cmd,
+        "test-echo": _build_test_echo_cmd,
     }
 
     builder = builders.get(plan.runtime)
@@ -119,6 +121,15 @@ def execute(
     started_at = _utc_now_iso()
     start_monotonic = time.monotonic()
 
+    # Flush Python's stdout/stderr before handing control to the
+    # subprocess. Without this, block-buffered Python output (piped
+    # stdout, e.g. `agentspec run | tee`) lands AFTER the subprocess's
+    # line-buffered writes, reordering the user-visible log from
+    # "resolver-info → runtime-output → launch-msg" to
+    # "runtime-output → resolver-info → launch-msg" at process exit.
+    # Surfaced by the v0.5.0 pitch-smoke demo.
+    sys.stdout.flush()
+    sys.stderr.flush()
     result = subprocess.run(cmd, env=env, cwd=workdir)
 
     if emit_record:
@@ -525,3 +536,21 @@ def _build_ollama_cmd(
     if input_text:
         cmd.append(input_text)
     return cmd
+
+
+def _build_test_echo_cmd(
+    plan: ResolvedPlan, manifest: AgentManifest, input_text: str | None
+) -> list[str]:
+    """Build argv for the ``test-echo`` pseudo-runtime.
+
+    Invokes POSIX ``echo`` with a deterministic "[test-echo] <prompt>"
+    line. Used by integration tests, demo scripts, and the pitch smoke
+    — never pointed at a real model. Binary discovery happens via
+    ``shutil.which("echo")`` in the resolver; ``echo`` is always on
+    PATH on Linux and macOS.
+
+    The prompt precedence is the same as every other runtime:
+    explicit ``input_text`` > ``manifest.soul`` > ``manifest.description``.
+    """
+    prompt = _derive_prompt(manifest, input_text) or f"{manifest.name}@{manifest.version}"
+    return ["echo", f"[test-echo] {prompt}"]

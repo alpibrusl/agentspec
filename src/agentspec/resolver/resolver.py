@@ -131,6 +131,14 @@ RUNTIME_BINARIES = {
     "goose": "goose",
     "aider": "aider",
     "ollama": "ollama",
+    # ``test-echo`` is a zero-dependency pseudo-runtime: it maps to
+    # POSIX ``echo``, always on PATH. Used by integration tests, demo
+    # scripts, and the "Docker of agents" pitch smoke so the full
+    # push → pull → lock → run → record pipeline can be exercised
+    # without installing any real LLM CLI. It's not a real runtime;
+    # manifest declarations of ``model.preferred: [test-echo/*]`` are
+    # explicitly a demo/test signal.
+    "test-echo": "echo",
 }
 
 
@@ -176,6 +184,8 @@ PROVIDER_MAP: dict[str, tuple[str, tuple[str, ...] | None]] = {
     # enough to select it.
     "goose": ("goose", None),
     "aider": ("aider", None),
+    # Zero-auth demo/test runtime — see RUNTIME_BINARIES above.
+    "test-echo": ("test-echo", None),
 }
 
 
