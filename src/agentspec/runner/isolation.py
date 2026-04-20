@@ -95,39 +95,28 @@ _SYSTEM_RO_BINDS: tuple[str, ...] = (
 def _existing_system_ro_binds() -> list[tuple[Path, Path]]:
     """Return the subset of ``_SYSTEM_RO_BINDS`` that exist on this host.
 
-    Prefix-aware dedup: on Ubuntu where ``/bin -> usr/bin`` is a
-    symlink, resolving both candidates gives ``/usr`` and ``/usr/bin``.
-    A plain set check treats them as distinct, so bwrap ends up with
-    the same content mounted at both ``/usr`` and ``/bin``. Checking
-    whether a candidate's resolved path is nested inside an already
-    committed one drops the redundant bind. Noted in PR #17 third-pass
-    review.
+    Binds each path at its original name (``/bin`` → ``/bin``,
+    ``/lib64`` → ``/lib64``) even when the host has them symlinked to
+    ``/usr`` (modern Debian/Ubuntu). Without the symlink paths in the
+    sandbox, an ELF binary fails to load its interpreter: every
+    glibc-built binary hardcodes ``/lib64/ld-linux-x86-64.so.2``, and
+    the kernel reports the missing interpreter as a confusing ``execvp
+    <binary>: No such file or directory`` error on the outer binary.
+    Surfaced by the v0.5.1 noether-adapter smoke against a
+    ``filesystem: none`` manifest; the earlier prefix-aware dedup
+    (PR #17 third-pass review) optimised away exactly the symlinks
+    the ELF loader needs.
+
+    Binding both ``/usr`` and ``/bin`` (→``/usr/bin``) creates two
+    views of the same content, which is fine — bwrap handles it
+    cleanly and the duplication is invisible to the stage.
     """
-    committed: list[Path] = []
     binds: list[tuple[Path, Path]] = []
     for raw in _SYSTEM_RO_BINDS:
         p = Path(raw)
-        if not p.exists():
-            continue
-        resolved = p.resolve()
-        # Skip when a parent directory is already committed — that bind
-        # already covers this path's contents.
-        if any(_is_same_or_descendant(resolved, existing) for existing in committed):
-            continue
-        committed.append(resolved)
-        binds.append((resolved, p))
+        if p.exists():
+            binds.append((p, p))
     return binds
-
-
-def _is_same_or_descendant(candidate: Path, existing: Path) -> bool:
-    """True when ``candidate`` is ``existing`` or lives inside it."""
-    if candidate == existing:
-        return True
-    try:
-        candidate.relative_to(existing)
-    except ValueError:
-        return False
-    return True
 
 
 def is_tight_trust(trust: TrustSpec) -> bool:

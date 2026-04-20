@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Noether adapter now delegates `filesystem: scoped`.** noether v0.7.2
+  ([PR noether#47](https://github.com/alpibrusl/noether/pull/47),
+  closing [noether#39](https://github.com/alpibrusl/noether/issues/39))
+  added `Vec<RwBind>` to `IsolationPolicy`, so agentspec's `scoped`
+  trust mode now crosses over as `rw_binds` entries instead of raising
+  `UnsupportedByNoetherAdapter` and falling back to direct-bwrap. The
+  workdir keeps its `work_host` mapping; additional scope paths become
+  named-struct `rw_binds` in the wire format. `filesystem: full`
+  (host-passthrough) stays on the fallback path — noether-sandbox has
+  no schema for `--bind / /`.
+
+### Added
+
+- **Noether isolation adapter** (Phase 2 of Proposal 002). Opt-in via
+  `AGENTSPEC_ISOLATION_BACKEND=noether`; delegates sandboxing to the
+  `noether-sandbox` binary (shipped in
+  [noether v0.7.1](https://github.com/alpibrusl/noether/releases/tag/v0.7.1)
+  / PR #37) instead of building the bwrap argv directly. Same sandbox
+  primitive, one upstream implementation across both noether stage
+  execution and agentspec trust enforcement. Writes the policy JSON to
+  a tmpfile and invokes `noether-sandbox --policy-file <path>
+  --isolate=bwrap --require-isolation --`, which gives us the
+  TLS-dual-path plumbing, trusted-PATH bwrap resolution,
+  UID-to-nobody mapping, and `128 + signum` exit-code convention from
+  the upstream review loop for free. Default remains the direct-bwrap
+  path until live parity data accumulates.
+- **Scope of the adapter**: `TrustSpec.filesystem` values `none` and
+  `read-only` delegate cleanly. `scoped` needs multi-path rw binds,
+  which `noether-isolation` v0.7.1 doesn't expose; the adapter
+  raises `UnsupportedByNoetherAdapter` and the runner falls back to
+  the direct-bwrap path with a debug log. Tracked upstream in
+  [noether#39](https://github.com/alpibrusl/noether/issues/39). A
+  follow-up agentspec patch will flip `scoped` over once `rw_binds`
+  ships.
+
+### Fixed
+
+- **`filesystem: none` / `read-only` under direct bwrap failed with
+  `execvp <binary>: No such file or directory`.** Surfaced during the
+  v0.5.1 noether-adapter smoke run — affected v0.5.0's direct-bwrap
+  path equally. Root cause: `_existing_system_ro_binds` deduped
+  symlink paths whose resolved target already fell under `/usr`, which
+  on modern Debian/Ubuntu drops `/lib64` from the sandbox. ELF
+  binaries hardcode `/lib64/ld-linux-x86-64.so.2` as their
+  interpreter; the missing symlink made the kernel report a confusing
+  "binary not found" on the outer binary rather than on its
+  interpreter. Fix: bind each existing `_SYSTEM_RO_BINDS` entry at its
+  original name. The twin-bind of `/usr/bin` via both `/usr` and
+  `/bin` is benign — bwrap handles the overlap cleanly. Regression
+  test in `tests/test_isolation.py`.
+
 ## [0.5.0] — 2026-04-19
 
 The "Docker of agents" release — six load-bearing features that
