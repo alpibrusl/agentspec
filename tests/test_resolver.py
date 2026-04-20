@@ -1,7 +1,9 @@
 """Tests for the resolver — environment negotiation engine."""
 
+import json
+import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -9,13 +11,13 @@ from agentspec.parser.loader import load_agent
 from agentspec.parser.manifest import AgentManifest, ModelSpec
 from agentspec.resolver.resolver import (
     ResolvedPlan,
-    resolve,
     _build_system_prompt,
     _capability_defaults,
     _detect_runtimes,
+    _query_llm_here_detect,
     _resolve_skills,
+    resolve,
 )
-
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
 
@@ -31,6 +33,219 @@ class TestRuntimeDetection:
         runtimes = _detect_runtimes()
         for v in runtimes.values():
             assert isinstance(v, bool)
+
+
+class TestLlmHereIntegration:
+    """Behaviour of `_detect_runtimes` when `llm-here` is/isn't installed."""
+
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_absent_returns_none(self, mock_which):
+        # Pretend `llm-here` is not on PATH.
+        mock_which.side_effect = lambda binary: None if binary == "llm-here" else "/usr/bin/other"
+        result = _query_llm_here_detect()
+        assert result is None
+
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_present_but_crashes_returns_none(self, mock_which, mock_run):
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["llm-here"], timeout=5.0)
+        assert _query_llm_here_detect() is None
+
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_non_zero_exit_returns_none(self, mock_which, mock_run):
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.return_value = MagicMock(returncode=2, stdout="", stderr="kaboom")
+        assert _query_llm_here_detect() is None
+
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_invalid_json_returns_none(self, mock_which, mock_run):
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.return_value = MagicMock(returncode=0, stdout="not json at all")
+        assert _query_llm_here_detect() is None
+
+    @pytest.mark.parametrize("payload", ["[]", "null", '"string"', "42"])
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_non_object_json_returns_none(
+        self, mock_which, mock_run, payload
+    ):
+        # Valid JSON but not the documented dict-with-providers shape —
+        # a future schema change or wire corruption would hit this. Must
+        # fall through to local detection, not raise AttributeError.
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.return_value = MagicMock(returncode=0, stdout=payload)
+        assert _query_llm_here_detect() is None
+
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_providers_not_a_list_returns_none(self, mock_which, mock_run):
+        # `providers` present but wrong type (object instead of array).
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='{"providers": {"claude-cli": true}}',
+        )
+        assert _query_llm_here_detect() is None
+
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_malformed_provider_entries_are_skipped(
+        self, mock_which, mock_run
+    ):
+        # Individual non-dict entries inside `providers` must not raise.
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "providers": [
+                        "not a dict",
+                        None,
+                        42,
+                        {"id": "claude-cli", "kind": "cli"},
+                    ]
+                }
+            ),
+        )
+        result = _query_llm_here_detect()
+        assert result is not None
+        assert result["claude-code"] is True
+
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_permission_error_returns_none(self, mock_which, mock_run):
+        # Binary on PATH but not executable (rare but happens with
+        # broken packaging). Must fall through to local detection.
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.side_effect = PermissionError(13, "Permission denied")
+        assert _query_llm_here_detect() is None
+
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_translates_provider_ids_to_agentspec_names(self, mock_which, mock_run):
+        # `llm-here detect` reports 2 of the 4 shared CLIs as reachable.
+        # We expect _query_llm_here_detect to translate the ids back to
+        # the agentspec runtime names with a stable dict shape.
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "schema_version": 1,
+                    "tool_version": "0.4.0",
+                    "cli_detection_skipped": False,
+                    "providers": [
+                        {"id": "claude-cli", "kind": "cli", "binary": "/usr/local/bin/claude"},
+                        {"id": "gemini-cli", "kind": "cli", "binary": "/usr/bin/gemini"},
+                        # An API provider (not a CLI) — must be ignored.
+                        {"id": "anthropic-api", "kind": "api", "env": "ANTHROPIC_API_KEY"},
+                    ],
+                }
+            ),
+        )
+        result = _query_llm_here_detect()
+        assert result is not None
+        # Exactly the 4 shared-CLI keys, translated to agentspec names.
+        assert set(result.keys()) == {"claude-code", "gemini-cli", "cursor-cli", "opencode"}
+        # Reported values reflect llm-here output.
+        assert result["claude-code"] is True
+        assert result["gemini-cli"] is True
+        assert result["cursor-cli"] is False
+        assert result["opencode"] is False
+
+    @patch("agentspec.resolver.resolver._query_llm_here_detect")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_detect_falls_back_to_local_when_llm_here_absent(self, mock_which, mock_query):
+        mock_query.return_value = None
+        # Pretend codex is installed, claude is not.
+        mock_which.side_effect = lambda b: "/usr/bin/codex" if b == "codex" else None
+        result = _detect_runtimes()
+        assert result["codex-cli"] is True
+        assert result["claude-code"] is False
+        # All keys from RUNTIME_BINARIES are present regardless.
+        assert "aider" in result
+        assert "ollama" in result
+
+    @patch("agentspec.resolver.resolver._query_llm_here_detect")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_detect_upgrades_false_to_true_via_llm_here(self, mock_which, mock_query):
+        # Local detection says claude is absent (not on Python's PATH),
+        # but llm-here found it in its own lookup path (e.g. per-user
+        # ~/.local/bin that wasn't exported to this shell). llm-here
+        # can upgrade False → True.
+        mock_which.return_value = None
+        mock_query.return_value = {
+            "claude-code": True,
+            "gemini-cli": False,
+            "cursor-cli": False,
+            "opencode": False,
+        }
+        result = _detect_runtimes()
+        assert result["claude-code"] is True
+        # Non-shared runtimes still fall back to shutil.which (False here).
+        assert result["codex-cli"] is False
+        assert result["ollama"] is False
+
+    @patch("agentspec.resolver.resolver._query_llm_here_detect")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_detect_does_not_downgrade_true_to_false(self, mock_which, mock_query):
+        # Binary is on Python's PATH (shutil.which returns a hit), but
+        # llm-here's registry lookup didn't find it (e.g. installed to
+        # a path llm-here doesn't probe). agentspec must keep the
+        # local True — union semantics, not override, so the merge is
+        # monotonic. Regression guard for the "not a strict improvement"
+        # issue raised on PR #29.
+        mock_which.side_effect = (
+            lambda b: "/usr/bin/claude" if b == "claude" else None
+        )
+        mock_query.return_value = {
+            "claude-code": False,
+            "gemini-cli": False,
+            "cursor-cli": False,
+            "opencode": False,
+        }
+        result = _detect_runtimes()
+        assert result["claude-code"] is True, (
+            "llm-here must not downgrade a locally-detected True to False"
+        )
+
+    def test_llm_here_map_keys_are_all_registered_runtimes(self):
+        # Drift guard: every agentspec name in _LLM_HERE_CLI_IDS must
+        # also be a key in RUNTIME_BINARIES. If someone adds a new
+        # llm-here mapping without also registering the runtime
+        # locally, the override loop would inject a name the rest of
+        # the resolver doesn't recognise.
+        from agentspec.resolver.resolver import (
+            _LLM_HERE_CLI_IDS,
+            RUNTIME_BINARIES,
+        )
+        unknown = set(_LLM_HERE_CLI_IDS) - set(RUNTIME_BINARIES)
+        assert not unknown, (
+            f"llm-here map has entries not in RUNTIME_BINARIES: {unknown}. "
+            f"Register the runtime locally or drop the mapping."
+        )
+
+    @patch("agentspec.resolver.resolver._query_llm_here_detect")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_detect_preserves_non_shared_detection_when_llm_here_present(
+        self, mock_which, mock_query
+    ):
+        # llm-here reports the 4 shared CLIs. Local detection is the
+        # source of truth for everything else.
+        mock_query.return_value = {
+            "claude-code": False,
+            "gemini-cli": False,
+            "cursor-cli": False,
+            "opencode": False,
+        }
+        # Simulate ollama being installed locally.
+        mock_which.side_effect = lambda b: "/usr/bin/ollama" if b == "ollama" else None
+        result = _detect_runtimes()
+        assert result["ollama"] is True
+        assert result["claude-code"] is False
 
 
 class TestCapabilityDefaults:

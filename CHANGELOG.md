@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Resolver runtime detection now delegates to `llm-here`.** The four
+  subscription CLIs shared with caloron-noether and noether-grid
+  (`claude-code`, `gemini-cli`, `cursor-cli`, `opencode`) are now
+  detected by calling `llm-here detect` and translating its provider
+  ids back to agentspec's runtime-name key space. Runtimes unique to
+  agentspec (`codex-cli`, `goose`, `aider`, `ollama`, `test-echo`)
+  continue to use `shutil.which`, as does everything if `llm-here` is
+  not on `PATH`. Merge is **union, not override**: llm-here can
+  upgrade a local `False` to `True` (CLI installed to a path
+  `shutil.which` doesn't see, e.g. a per-user `~/.local/bin` that
+  wasn't exported), but cannot downgrade a local `True` to `False` —
+  `shutil.which` returning a path is ground truth for "this process
+  can spawn the binary." Closes
+  [#28](https://github.com/alpibrusl/agentspec/issues/28).
+
+  Motivation: three sibling projects (caloron-noether, noether-grid,
+  agentspec) were each reimplementing "which LLM CLI is installed" and
+  had already drifted. `llm-here` is the shared detector; see
+  [`alpibrusl/llm-here`](https://github.com/alpibrusl/llm-here) and the
+  research note in
+  [`noether/docs/research/llm-here.md`](https://github.com/alpibrusl/noether/blob/main/docs/research/llm-here.md).
+
 - **Noether adapter now delegates `filesystem: scoped`.** noether v0.7.2
   ([PR noether#47](https://github.com/alpibrusl/noether/pull/47),
   closing [noether#39](https://github.com/alpibrusl/noether/issues/39))
