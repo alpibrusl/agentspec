@@ -16,11 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   ids back to agentspec's runtime-name key space. Runtimes unique to
   agentspec (`codex-cli`, `goose`, `aider`, `ollama`, `test-echo`)
   continue to use `shutil.which`, as does everything if `llm-here` is
-  not on `PATH`. Behaviour: identical to prior detection when the
-  binary is present on both paths; when it's reachable via llm-here's
-  registry path but not on the Python process's `PATH`, the llm-here
-  answer wins and agentspec now sees it as available — a strict
-  improvement. Closes [#28](https://github.com/alpibrusl/agentspec/issues/28).
+  not on `PATH`. Merge is **union, not override**: llm-here can
+  upgrade a local `False` to `True` (CLI installed to a path
+  `shutil.which` doesn't see, e.g. a per-user `~/.local/bin` that
+  wasn't exported), but cannot downgrade a local `True` to `False` —
+  `shutil.which` returning a path is ground truth for "this process
+  can spawn the binary." Closes
+  [#28](https://github.com/alpibrusl/agentspec/issues/28).
 
   Motivation: three sibling projects (caloron-noether, noether-grid,
   agentspec) were each reimplementing "which LLM CLI is installed" and

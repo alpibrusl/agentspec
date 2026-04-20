@@ -66,6 +66,63 @@ class TestLlmHereIntegration:
         mock_run.return_value = MagicMock(returncode=0, stdout="not json at all")
         assert _query_llm_here_detect() is None
 
+    @pytest.mark.parametrize("payload", ["[]", "null", '"string"', "42"])
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_non_object_json_returns_none(
+        self, mock_which, mock_run, payload
+    ):
+        # Valid JSON but not the documented dict-with-providers shape —
+        # a future schema change or wire corruption would hit this. Must
+        # fall through to local detection, not raise AttributeError.
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.return_value = MagicMock(returncode=0, stdout=payload)
+        assert _query_llm_here_detect() is None
+
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_providers_not_a_list_returns_none(self, mock_which, mock_run):
+        # `providers` present but wrong type (object instead of array).
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='{"providers": {"claude-cli": true}}',
+        )
+        assert _query_llm_here_detect() is None
+
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_malformed_provider_entries_are_skipped(
+        self, mock_which, mock_run
+    ):
+        # Individual non-dict entries inside `providers` must not raise.
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "providers": [
+                        "not a dict",
+                        None,
+                        42,
+                        {"id": "claude-cli", "kind": "cli"},
+                    ]
+                }
+            ),
+        )
+        result = _query_llm_here_detect()
+        assert result is not None
+        assert result["claude-code"] is True
+
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_permission_error_returns_none(self, mock_which, mock_run):
+        # Binary on PATH but not executable (rare but happens with
+        # broken packaging). Must fall through to local detection.
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.side_effect = PermissionError(13, "Permission denied")
+        assert _query_llm_here_detect() is None
+
     @patch("agentspec.resolver.resolver.subprocess.run")
     @patch("agentspec.resolver.resolver.shutil.which")
     def test_llm_here_translates_provider_ids_to_agentspec_names(self, mock_which, mock_run):
@@ -114,13 +171,12 @@ class TestLlmHereIntegration:
 
     @patch("agentspec.resolver.resolver._query_llm_here_detect")
     @patch("agentspec.resolver.resolver.shutil.which")
-    def test_detect_overrides_with_llm_here_when_present(self, mock_which, mock_query):
-        # Local detection would say claude is absent…
+    def test_detect_upgrades_false_to_true_via_llm_here(self, mock_which, mock_query):
+        # Local detection says claude is absent (not on Python's PATH),
+        # but llm-here found it in its own lookup path (e.g. per-user
+        # ~/.local/bin that wasn't exported to this shell). llm-here
+        # can upgrade False → True.
         mock_which.return_value = None
-        # …but llm-here says it's reachable (picked it up from a path
-        # shutil.which doesn't see, e.g. a per-user ~/.local/bin not in
-        # PATH at agentspec startup but detected via llm-here's own
-        # lookup at dispatch time). The llm-here answer wins.
         mock_query.return_value = {
             "claude-code": True,
             "gemini-cli": False,
@@ -132,6 +188,45 @@ class TestLlmHereIntegration:
         # Non-shared runtimes still fall back to shutil.which (False here).
         assert result["codex-cli"] is False
         assert result["ollama"] is False
+
+    @patch("agentspec.resolver.resolver._query_llm_here_detect")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_detect_does_not_downgrade_true_to_false(self, mock_which, mock_query):
+        # Binary is on Python's PATH (shutil.which returns a hit), but
+        # llm-here's registry lookup didn't find it (e.g. installed to
+        # a path llm-here doesn't probe). agentspec must keep the
+        # local True — union semantics, not override, so the merge is
+        # monotonic. Regression guard for the "not a strict improvement"
+        # issue raised on PR #29.
+        mock_which.side_effect = (
+            lambda b: "/usr/bin/claude" if b == "claude" else None
+        )
+        mock_query.return_value = {
+            "claude-code": False,
+            "gemini-cli": False,
+            "cursor-cli": False,
+            "opencode": False,
+        }
+        result = _detect_runtimes()
+        assert result["claude-code"] is True, (
+            "llm-here must not downgrade a locally-detected True to False"
+        )
+
+    def test_llm_here_map_keys_are_all_registered_runtimes(self):
+        # Drift guard: every agentspec name in _LLM_HERE_CLI_IDS must
+        # also be a key in RUNTIME_BINARIES. If someone adds a new
+        # llm-here mapping without also registering the runtime
+        # locally, the override loop would inject a name the rest of
+        # the resolver doesn't recognise.
+        from agentspec.resolver.resolver import (
+            _LLM_HERE_CLI_IDS,
+            RUNTIME_BINARIES,
+        )
+        unknown = set(_LLM_HERE_CLI_IDS) - set(RUNTIME_BINARIES)
+        assert not unknown, (
+            f"llm-here map has entries not in RUNTIME_BINARIES: {unknown}. "
+            f"Register the runtime locally or drop the mapping."
+        )
 
     @patch("agentspec.resolver.resolver._query_llm_here_detect")
     @patch("agentspec.resolver.resolver.shutil.which")

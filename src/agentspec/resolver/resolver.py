@@ -163,7 +163,7 @@ _LLM_HERE_CLI_IDS = {
 }
 
 
-def _query_llm_here_detect(timeout: float = 5.0) -> dict[str, bool] | None:
+def _query_llm_here_detect(timeout: float = 15.0) -> dict[str, bool] | None:
     """Call `llm-here detect` and translate its output to the agentspec
     runtime-name key space. Returns `None` if llm-here isn't installed
     or the call failed — caller falls back to local detection.
@@ -171,6 +171,13 @@ def _query_llm_here_detect(timeout: float = 5.0) -> dict[str, bool] | None:
     Wire contract: `llm-here detect` prints a JSON object with a
     `providers: [{id, kind, ...}]` list. See
     https://github.com/alpibrusl/llm-here/blob/main/SCHEMA.md.
+
+    Timeout budget is generous (15s): llm-here has to probe up to four
+    CLI binaries, each with its own exec cost, which can be slow under
+    Nix / slow-disk conditions. caloron hit a ~25s cap under Nix-30s
+    timeouts. A conservative timeout costs nothing on the happy path
+    and turns the "broken llm-here" edge case into a bounded slowdown
+    rather than an indefinite hang.
     """
     if not shutil.which("llm-here"):
         return None
@@ -182,7 +189,10 @@ def _query_llm_here_detect(timeout: float = 5.0) -> dict[str, bool] | None:
             timeout=timeout,
             check=False,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        # OSError covers FileNotFoundError (PATH race) and
+        # PermissionError (binary on PATH but not executable). Any
+        # other spawn-time failure falls through to local detection.
         logger.debug("llm-here detect failed to spawn: %s", exc)
         return None
     if result.returncode != 0:
@@ -193,9 +203,22 @@ def _query_llm_here_detect(timeout: float = 5.0) -> dict[str, bool] | None:
         )
         return None
     try:
-        providers = json.loads(result.stdout).get("providers", [])
+        doc = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         logger.debug("llm-here detect emitted invalid JSON: %s", exc)
+        return None
+
+    # Schema-shape defence: a future breaking change or wire corruption
+    # could return valid JSON that isn't the documented
+    # `{providers: [...]}` object. Refuse rather than raise — the
+    # caller interprets None as "llm-here unusable, use local
+    # detection", which is the safe outcome.
+    if not isinstance(doc, dict):
+        logger.debug("llm-here detect returned non-object: %s", type(doc).__name__)
+        return None
+    providers = doc.get("providers", [])
+    if not isinstance(providers, list):
+        logger.debug("llm-here detect returned non-list providers")
         return None
 
     # Invert _LLM_HERE_CLI_IDS so we can look up agentspec names by the
@@ -206,6 +229,11 @@ def _query_llm_here_detect(timeout: float = 5.0) -> dict[str, bool] | None:
     }
     seen: dict[str, bool] = {name: False for name in _LLM_HERE_CLI_IDS}
     for provider in providers:
+        # Individual entries can be junk (malformed registry row,
+        # future schema addition we don't understand yet) — skip
+        # rather than raise.
+        if not isinstance(provider, dict):
+            continue
         pid = provider.get("id")
         if not pid:
             continue
@@ -223,6 +251,16 @@ def _detect_runtimes() -> dict[str, bool]:
     runtime not covered by llm-here — or any detection when llm-here is
     absent — falls back to `shutil.which(binary)`.
 
+    Merge semantics are **union, not override**: llm-here can upgrade a
+    local `False` to `True` (picks up CLIs installed to paths
+    `shutil.which` doesn't see, e.g. a per-user `~/.local/bin` that
+    wasn't exported to this process's `PATH`), but it cannot downgrade
+    a local `True` to `False`. `shutil.which` returning a path means
+    the Python process *can* spawn the binary — ground truth for
+    reachability, regardless of whether llm-here's registry probe
+    noticed it. Without this, a conservative llm-here would regress
+    detection vs. the pre-migration baseline.
+
     See https://github.com/alpibrusl/llm-here for the shared detector;
     the motivating design note is `noether/docs/research/llm-here.md`.
     """
@@ -232,8 +270,9 @@ def _detect_runtimes() -> dict[str, bool]:
     }
     llm_here_results = _query_llm_here_detect()
     if llm_here_results is not None:
-        # Override the baseline for runtimes llm-here knows about.
-        available.update(llm_here_results)
+        for name, llm_here_said in llm_here_results.items():
+            # OR, not assignment — keeps the merge monotonic.
+            available[name] = available.get(name, False) or llm_here_said
     return available
 
 
