@@ -1,7 +1,9 @@
 """Tests for the resolver — environment negotiation engine."""
 
+import json
+import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -9,13 +11,13 @@ from agentspec.parser.loader import load_agent
 from agentspec.parser.manifest import AgentManifest, ModelSpec
 from agentspec.resolver.resolver import (
     ResolvedPlan,
-    resolve,
     _build_system_prompt,
     _capability_defaults,
     _detect_runtimes,
+    _query_llm_here_detect,
     _resolve_skills,
+    resolve,
 )
-
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
 
@@ -31,6 +33,124 @@ class TestRuntimeDetection:
         runtimes = _detect_runtimes()
         for v in runtimes.values():
             assert isinstance(v, bool)
+
+
+class TestLlmHereIntegration:
+    """Behaviour of `_detect_runtimes` when `llm-here` is/isn't installed."""
+
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_absent_returns_none(self, mock_which):
+        # Pretend `llm-here` is not on PATH.
+        mock_which.side_effect = lambda binary: None if binary == "llm-here" else "/usr/bin/other"
+        result = _query_llm_here_detect()
+        assert result is None
+
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_present_but_crashes_returns_none(self, mock_which, mock_run):
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["llm-here"], timeout=5.0)
+        assert _query_llm_here_detect() is None
+
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_non_zero_exit_returns_none(self, mock_which, mock_run):
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.return_value = MagicMock(returncode=2, stdout="", stderr="kaboom")
+        assert _query_llm_here_detect() is None
+
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_invalid_json_returns_none(self, mock_which, mock_run):
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.return_value = MagicMock(returncode=0, stdout="not json at all")
+        assert _query_llm_here_detect() is None
+
+    @patch("agentspec.resolver.resolver.subprocess.run")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_llm_here_translates_provider_ids_to_agentspec_names(self, mock_which, mock_run):
+        # `llm-here detect` reports 2 of the 4 shared CLIs as reachable.
+        # We expect _query_llm_here_detect to translate the ids back to
+        # the agentspec runtime names with a stable dict shape.
+        mock_which.return_value = "/usr/bin/llm-here"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "schema_version": 1,
+                    "tool_version": "0.4.0",
+                    "cli_detection_skipped": False,
+                    "providers": [
+                        {"id": "claude-cli", "kind": "cli", "binary": "/usr/local/bin/claude"},
+                        {"id": "gemini-cli", "kind": "cli", "binary": "/usr/bin/gemini"},
+                        # An API provider (not a CLI) — must be ignored.
+                        {"id": "anthropic-api", "kind": "api", "env": "ANTHROPIC_API_KEY"},
+                    ],
+                }
+            ),
+        )
+        result = _query_llm_here_detect()
+        assert result is not None
+        # Exactly the 4 shared-CLI keys, translated to agentspec names.
+        assert set(result.keys()) == {"claude-code", "gemini-cli", "cursor-cli", "opencode"}
+        # Reported values reflect llm-here output.
+        assert result["claude-code"] is True
+        assert result["gemini-cli"] is True
+        assert result["cursor-cli"] is False
+        assert result["opencode"] is False
+
+    @patch("agentspec.resolver.resolver._query_llm_here_detect")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_detect_falls_back_to_local_when_llm_here_absent(self, mock_which, mock_query):
+        mock_query.return_value = None
+        # Pretend codex is installed, claude is not.
+        mock_which.side_effect = lambda b: "/usr/bin/codex" if b == "codex" else None
+        result = _detect_runtimes()
+        assert result["codex-cli"] is True
+        assert result["claude-code"] is False
+        # All keys from RUNTIME_BINARIES are present regardless.
+        assert "aider" in result
+        assert "ollama" in result
+
+    @patch("agentspec.resolver.resolver._query_llm_here_detect")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_detect_overrides_with_llm_here_when_present(self, mock_which, mock_query):
+        # Local detection would say claude is absent…
+        mock_which.return_value = None
+        # …but llm-here says it's reachable (picked it up from a path
+        # shutil.which doesn't see, e.g. a per-user ~/.local/bin not in
+        # PATH at agentspec startup but detected via llm-here's own
+        # lookup at dispatch time). The llm-here answer wins.
+        mock_query.return_value = {
+            "claude-code": True,
+            "gemini-cli": False,
+            "cursor-cli": False,
+            "opencode": False,
+        }
+        result = _detect_runtimes()
+        assert result["claude-code"] is True
+        # Non-shared runtimes still fall back to shutil.which (False here).
+        assert result["codex-cli"] is False
+        assert result["ollama"] is False
+
+    @patch("agentspec.resolver.resolver._query_llm_here_detect")
+    @patch("agentspec.resolver.resolver.shutil.which")
+    def test_detect_preserves_non_shared_detection_when_llm_here_present(
+        self, mock_which, mock_query
+    ):
+        # llm-here reports the 4 shared CLIs. Local detection is the
+        # source of truth for everything else.
+        mock_query.return_value = {
+            "claude-code": False,
+            "gemini-cli": False,
+            "cursor-cli": False,
+            "opencode": False,
+        }
+        # Simulate ollama being installed locally.
+        mock_which.side_effect = lambda b: "/usr/bin/ollama" if b == "ollama" else None
+        result = _detect_runtimes()
+        assert result["ollama"] is True
+        assert result["claude-code"] is False
 
 
 class TestCapabilityDefaults:
