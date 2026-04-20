@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Noether adapter now delegates `filesystem: scoped`.** noether v0.7.2
+  ([PR noether#47](https://github.com/alpibrusl/noether/pull/47),
+  closing [noether#39](https://github.com/alpibrusl/noether/issues/39))
+  added `Vec<RwBind>` to `IsolationPolicy`, so agentspec's `scoped`
+  trust mode now crosses over as `rw_binds` entries instead of raising
+  `UnsupportedByNoetherAdapter` and falling back to direct-bwrap. The
+  workdir keeps its `work_host` mapping; additional scope paths become
+  named-struct `rw_binds` in the wire format. `filesystem: full`
+  (host-passthrough) stays on the fallback path — noether-sandbox has
+  no schema for `--bind / /`.
+
 ### Added
 
 - **Noether isolation adapter** (Phase 2 of Proposal 002). Opt-in via

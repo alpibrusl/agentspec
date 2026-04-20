@@ -71,9 +71,10 @@ def test_json_preserves_network_and_env_allowlist(tmp_path: Path) -> None:
     assert doc["env_allowlist"] == ["PATH", "HOME", "ANTHROPIC_API_KEY"]
 
 
-def test_json_rejects_extra_rw_binds_beyond_workdir(tmp_path: Path) -> None:
-    # noether v0.7.1 has no multi-path rw_binds; refuse rather than
-    # silently drop scope paths. Tracked in noether#39.
+def test_json_emits_extra_rw_binds_as_named_structs(tmp_path: Path) -> None:
+    # noether v0.7.2 (issue #39, PR #47) added multi-path rw_binds.
+    # The adapter now delegates scoped rw mounts rather than falling
+    # back to direct-bwrap.
     scope = tmp_path / "scope-dir"
     scope.mkdir()
     policy = IsolationPolicy(
@@ -83,9 +84,24 @@ def test_json_rejects_extra_rw_binds_beyond_workdir(tmp_path: Path) -> None:
         env_allowlist=[],
     )
 
-    with pytest.raises(UnsupportedByNoetherAdapter) as excinfo:
-        policy_to_noether_json(policy, workdir=tmp_path)
-    assert "noether/issues/39" in str(excinfo.value)
+    doc = json.loads(policy_to_noether_json(policy, workdir=tmp_path))
+    # Workdir keeps its privileged mapping via ``work_host``; the
+    # remaining scope entry surfaces through ``rw_binds``.
+    assert doc["work_host"] == str(tmp_path)
+    assert doc["rw_binds"] == [{"host": str(scope), "sandbox": str(scope)}]
+
+
+def test_json_rw_binds_empty_when_only_workdir(tmp_path: Path) -> None:
+    # ``filesystem: none`` has a single rw_bind (workdir) → no extra
+    # rw_binds on the wire.
+    policy = IsolationPolicy(
+        ro_binds=[],
+        rw_binds=[(tmp_path, tmp_path)],
+        network=False,
+        env_allowlist=[],
+    )
+    doc = json.loads(policy_to_noether_json(policy, workdir=tmp_path))
+    assert doc["rw_binds"] == []
 
 
 def test_json_rejects_host_passthrough(tmp_path: Path) -> None:
@@ -131,9 +147,10 @@ def test_json_from_trust_read_only_is_supported(tmp_path: Path) -> None:
     ]
 
 
-def test_json_from_trust_scoped_is_rejected(tmp_path: Path) -> None:
-    # ``filesystem: scoped`` adds rw_binds beyond the workdir —
-    # unsupported until noether#39 lands.
+def test_json_from_trust_scoped_delegates(tmp_path: Path) -> None:
+    # ``filesystem: scoped`` scope paths are now expressible in the
+    # noether wire format (v0.7.2, PR noether#47). Workdir stays on
+    # ``work_host``; each scope path crosses as an ``rw_binds`` entry.
     scope = tmp_path / "project"
     scope.mkdir()
     policy = policy_from_trust(
@@ -142,8 +159,12 @@ def test_json_from_trust_scoped_is_rejected(tmp_path: Path) -> None:
         ),
         workdir=tmp_path,
     )
-    with pytest.raises(UnsupportedByNoetherAdapter):
-        policy_to_noether_json(policy, workdir=tmp_path)
+    doc = json.loads(policy_to_noether_json(policy, workdir=tmp_path))
+    assert doc["work_host"] == str(tmp_path)
+    # resolve() because ``policy_from_trust`` canonicalises scope paths.
+    assert {"host": str(scope.resolve()), "sandbox": str(scope.resolve())} in doc[
+        "rw_binds"
+    ]
 
 
 # ── build_noether_argv ────────────────────────────────────────────────────

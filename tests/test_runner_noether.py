@@ -158,15 +158,20 @@ def test_noether_backend_falls_back_when_binary_missing(
     )
 
 
-def test_noether_backend_falls_back_on_unsupported_scoped_policy(
-    tmp_path, fake_provision, fake_run, monkeypatch, caplog
+def test_noether_backend_delegates_scoped_trust(
+    tmp_path, fake_provision, fake_run, monkeypatch
 ):
+    # noether v0.7.2 (PR noether#47) landed ``rw_binds``, so
+    # ``filesystem: scoped`` no longer needs the fallback path.
     monkeypatch.setenv("AGENTSPEC_ISOLATION_BACKEND", "noether")
     monkeypatch.setattr(
         "shutil.which",
         _which_stub({"bwrap": "/usr/bin/bwrap", "noether-sandbox": "/usr/bin/noether-sandbox"}),
     )
-    caplog.set_level(logging.WARNING, logger="agentspec.runner.runner")
+
+    # Preserve the policy tmpfile so the test can inspect its contents;
+    # runner.execute normally unlinks it after subprocess returns.
+    monkeypatch.setattr(runner.Path, "unlink", lambda self, *a, **kw: None)
 
     scope = tmp_path / "project"
     scope.mkdir()
@@ -183,9 +188,40 @@ def test_noether_backend_falls_back_on_unsupported_scoped_policy(
     )
 
     argv = fake_run[0]["cmd"]
-    assert argv[0] == "/usr/bin/bwrap"  # fell back to direct path
+    assert argv[0] == "/usr/bin/noether-sandbox"
+
+    # Verify the scope path crossed as an rw_binds entry in the policy
+    # file handed to noether-sandbox.
+    pf_idx = argv.index("--policy-file")
+    doc = json.loads(Path(argv[pf_idx + 1]).read_text())
+    assert {"host": str(scope.resolve()), "sandbox": str(scope.resolve())} in doc[
+        "rw_binds"
+    ]
+
+
+def test_noether_backend_still_falls_back_on_filesystem_full(
+    tmp_path, fake_provision, fake_run, monkeypatch, caplog
+):
+    # ``filesystem: full`` is ``--bind / /`` host-passthrough — noether
+    # still has no schema for it, so this fallback stays.
+    monkeypatch.setenv("AGENTSPEC_ISOLATION_BACKEND", "noether")
+    monkeypatch.setattr(
+        "shutil.which",
+        _which_stub({"bwrap": "/usr/bin/bwrap", "noether-sandbox": "/usr/bin/noether-sandbox"}),
+    )
+    caplog.set_level(logging.WARNING, logger="agentspec.runner.runner")
+
+    runner.execute(
+        _plan(),
+        _manifest(TrustSpec(filesystem="full", network="allowed", exec="full")),
+        workdir=tmp_path,
+        emit_record=False,
+    )
+
+    argv = fake_run[0]["cmd"]
+    assert argv[0] == "/usr/bin/bwrap"
     assert any(
-        "noether" in r.message.lower() and ("scoped" in r.message.lower() or "fallback" in r.message.lower())
+        "noether" in r.message.lower() and "fallback" in r.message.lower()
         for r in caplog.records
     )
 

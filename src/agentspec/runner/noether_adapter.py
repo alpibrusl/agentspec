@@ -15,13 +15,13 @@ both noether stage execution and agentspec trust enforcement.
 
 Scope today:
 
-- ``TrustSpec.filesystem`` values ``none`` / ``read-only`` map cleanly
-  into noether's (``ro_binds``, ``work_host``) shape.
-- ``scoped`` needs multi-path rw mounts, which noether-isolation v0.7.1
-  doesn't expose. Tracked upstream in noether#39; the adapter raises
-  :class:`UnsupportedByNoetherAdapter` so the caller can fall back.
-- ``full`` is host-passthrough; there is no noether-sandbox flag for
-  it. Same rejection path.
+- ``TrustSpec.filesystem`` values ``none`` / ``read-only`` / ``scoped``
+  all delegate via ``noether-sandbox`` v0.7.2+. Workdir renders as
+  ``work_host``; extra scope paths cross as ``rw_binds`` (the struct
+  added in noether#47).
+- ``full`` is host-passthrough (``--bind / /``); noether-sandbox has
+  no schema for it. :class:`UnsupportedByNoetherAdapter` is raised so
+  the caller can fall back to the direct-bwrap path.
 """
 
 from __future__ import annotations
@@ -57,41 +57,42 @@ def policy_to_noether_json(policy: IsolationPolicy, workdir: Path) -> str:
     The mapping:
 
     - agentspec ``ro_binds`` → noether ``ro_binds`` as
-      ``{"host": ..., "sandbox": ...}`` structs (shape pinned by
+      ``{"host": ..., "sandbox": ...}`` structs (shape pinned in
       noether#37).
-    - agentspec's workdir (the primary rw mount) → noether ``work_host``.
-      Inside the sandbox, workdir appears at ``/work``.
-    - Any rw bind **beyond** workdir triggers
-      :class:`UnsupportedByNoetherAdapter` — v0.7.1 noether has one
-      rw slot, not many. Silent dropping would defeat the agent's
-      declared trust.
-    - A ``--bind / /`` rw entry (``filesystem: full``) triggers the
-      same error for the same reason.
+    - agentspec's workdir (the primary rw mount, always first in
+      ``policy.rw_binds`` by ``policy_from_trust`` construction) →
+      noether ``work_host``. Inside the sandbox, workdir appears at
+      ``/work``.
+    - Any *additional* rw mount (``filesystem: scoped`` scope paths)
+      → noether ``rw_binds`` (shape added in noether#47, v0.7.2).
+    - A ``--bind / /`` rw entry (``filesystem: full``) has no
+      expressible form in noether-isolation's schema. Raises
+      :class:`UnsupportedByNoetherAdapter` so the runner falls back
+      to the direct-bwrap path.
     """
     workdir_resolved = workdir.resolve()
-    extra_rw: list[tuple[Path, Path]] = []
-    for host, _sandbox in policy.rw_binds:
-        if Path(str(host)) == Path("/"):
+    extra_rw: list[dict[str, str]] = []
+    for host, sandbox in policy.rw_binds:
+        host_path = Path(str(host))
+        if host_path == Path("/"):
             raise UnsupportedByNoetherAdapter(
                 "noether-sandbox has no host-passthrough (``filesystem: full``) "
                 "mode; caller should fall back to the direct-bwrap path"
             )
-        if Path(str(host)).resolve() != workdir_resolved:
-            extra_rw.append((host, _sandbox))
-
-    if extra_rw:
-        raise UnsupportedByNoetherAdapter(
-            f"noether-sandbox (v0.7.1) has no multi-rw-bind support; "
-            f"refusing to silently drop {len(extra_rw)} scoped rw mount(s). "
-            f"Tracked in https://github.com/alpibrusl/noether/issues/39. "
-            f"Falling back to the direct-bwrap path preserves the declared trust."
-        )
+        if host_path.resolve() == workdir_resolved:
+            # First entry is workdir — represented via ``work_host``,
+            # not ``rw_binds``. Skip here so a naïvely-constructed
+            # policy with a duplicate workdir entry doesn't produce
+            # a spurious rw_binds item either.
+            continue
+        extra_rw.append({"host": str(host), "sandbox": str(sandbox)})
 
     doc = {
         "ro_binds": [
             {"host": str(host), "sandbox": str(sandbox)}
             for host, sandbox in policy.ro_binds
         ],
+        "rw_binds": extra_rw,
         "work_host": str(workdir),
         "network": policy.network,
         "env_allowlist": list(policy.env_allowlist),
