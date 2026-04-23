@@ -83,6 +83,22 @@ app = ACLIApp(
     name="agentspec",
     version="0.1.0",
     help="Universal agent manifest standard — resolve and run .agent files",
+    # Frontmatter fed into ``agentspec skill`` output. Consumed by
+    # agentskills.io-compatible tools (Claude Code, Cursor, Gemini CLI,
+    # Codex, …) to decide when to reach for agentspec. See
+    # docs/agents/ for the full playbook surface.
+    skill_description=(
+        "Resolve and run AI agent manifests (.agent files) across multiple "
+        "LLM runtimes. Manifests declare persona, skills, trust, model "
+        "preferences; agentspec picks a concrete runtime + model from the "
+        "environment."
+    ),
+    skill_when_to_use=(
+        "Use when the user has a .agent manifest or wants to validate, "
+        "resolve, run, lock, or publish one. Do not reach for agentspec "
+        "to invoke an LLM directly — the runtimes agentspec spawns "
+        "(claude-code, gemini-cli, etc.) remain the right tool for that."
+    ),
 )
 
 
