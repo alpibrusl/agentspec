@@ -34,7 +34,7 @@ classifiers = [
 dependencies = [
     "pydantic>=2.0",
     "pyyaml>=6.0",
-    "acli-spec>=0.4.0",
+    "acli-spec>=0.5.0",
     "typer>=0.9",
     # PyNaCl is the only signing backend — see agentspec/profile/signing.py.
     # The HMAC fallback was removed in 0.4.1 because it silently rubber-stamped

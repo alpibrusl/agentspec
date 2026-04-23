@@ -10,8 +10,10 @@ on:
   pull_request:
     paths:
       - 'README.md'
+      - 'SKILL.md'
       - 'examples/**'
       - 'pyproject.toml'
+      - 'src/agentspec/cli/**'
       - '.github/workflows/quickstart.yml'
   workflow_dispatch:
 
@@ -52,6 +54,19 @@ jobs:
             echo "::endgroup::"
           done
           exit "$failed"
+
+      - name: SKILL.md drift check
+        # Regenerate SKILL.md from the current CLI surface and fail if it
+        # drifted from the committed copy. Mirrors the schemas/agent-v1.json
+        # drift check — the CLI is the source of truth; committed artefacts
+        # must match. Run ``agentspec skill --out SKILL.md`` locally when
+        # this fails.
+        run: |
+          agentspec skill --out /tmp/SKILL.md.regenerated
+          diff -u SKILL.md /tmp/SKILL.md.regenerated || {
+            echo "::error::SKILL.md is stale. Run 'agentspec skill --out SKILL.md' and commit the result."
+            exit 1
+          }
 
       - name: Import-time smoke test
         run: |

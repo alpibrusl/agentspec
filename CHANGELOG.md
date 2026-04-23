@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`SKILL.md` at repo root** (agentskills.io open standard). Generated
+  by `agentspec skill --out SKILL.md`; contains `name` / `description` /
+  `when_to_use` frontmatter plus the full command reference. Drops
+  directly into `.claude/skills/agentspec/SKILL.md`,
+  `.cursor/skills/agentspec/SKILL.md`, Gemini CLI, Codex, and other
+  [agentskills.io](https://agentskills.io)-compatible tools so an agent
+  can bootstrap on agentspec without running `--help` first. A CI drift
+  check regenerates `SKILL.md` and fails the build if it diverged from
+  the committed copy — mirrors the schema drift guard.
+
 ### Changed
+
+- **Bumped `acli-spec` pin to `>=0.5.0`** — the release adds
+  `skill_description` and `skill_when_to_use` kwargs on `ACLIApp`
+  (agentskills.io frontmatter) and renames the emitted file from
+  `SKILLS.md` (plural) to `SKILL.md` (singular) per the open standard.
+  See [acli PR #30](https://github.com/alpibrusl/acli/pull/30).
 
 - **Resolver runtime detection now delegates to `llm-here`.** The four
   subscription CLIs shared with caloron-noether and noether-grid
