@@ -52,7 +52,15 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - "Tutorial: citation-auditor agent": tutorial/index.md
+  - Tutorial:
+      - Core concepts: tutorial/concepts.md
+      - Full pipeline walkthrough: tutorial/full-pipeline.md
+      - "Worked example: citation-auditor": tutorial/index.md
+      - When things go wrong: tutorial/when-things-go-wrong.md
+  - For AI Agents:
+      - Create an agent: agents/create-an-agent.md
+      - Resolve and run: agents/resolve-and-run.md
+      - Debug a failed run: agents/debug-a-failed-run.md
   - Getting Started:
       - Quick Start: getting-started/quickstart.md
       - Installation: getting-started/install.md
