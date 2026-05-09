@@ -145,6 +145,75 @@ def test_record_resolver_decisions_default_empty_when_plan_has_none(
     assert r.resolver_decisions == []
 
 
+def test_record_resolver_trace_carried_from_plan(
+    tmp_path, fake_subprocess, fake_provision
+):
+    """Structured trace from the resolver lands on the record so audit tools
+    can answer 'why this model' without parsing free text."""
+    from agentspec.resolver.trace import (
+        ModelCandidate,
+        ModelSelection,
+        ResolverTrace,
+        RuntimeDetection,
+        SkillResolution,
+    )
+
+    plan = _plan()
+    plan.trace = ResolverTrace(
+        runtimes_detected=[
+            RuntimeDetection(name="claude-code", available=True),
+            RuntimeDetection(name="gemini-cli", available=False),
+        ],
+        model_selection=ModelSelection(
+            candidates=[
+                ModelCandidate(
+                    model="claude/claude-sonnet-4-6",
+                    provider="claude",
+                    runtime="claude-code",
+                    outcome="selected",
+                    auth_source="env.ANTHROPIC_API_KEY",
+                ),
+            ],
+            selected_model="claude/claude-sonnet-4-6",
+            selected_runtime="claude-code",
+            selected_auth_source="env.ANTHROPIC_API_KEY",
+        ),
+        skills=[
+            SkillResolution(
+                skill="web-search",
+                outcome="resolved",
+                resolved_to="brave-mcp",
+                candidates=["brave-mcp", "serper-mcp"],
+            )
+        ],
+    )
+    runner.execute(plan, _manifest(), workdir=tmp_path)
+
+    r = RecordManager(tmp_path).list()[0]
+    assert r.resolver_trace is not None
+    assert r.resolver_trace.model_selection.selected_model == (
+        "claude/claude-sonnet-4-6"
+    )
+    assert r.resolver_trace.skills[0].resolved_to == "brave-mcp"
+    assert [rt.name for rt in r.resolver_trace.runtimes_detected] == [
+        "claude-code",
+        "gemini-cli",
+    ]
+
+
+def test_record_resolver_trace_is_none_for_hand_built_plans(
+    tmp_path, fake_subprocess, fake_provision
+):
+    """A plan with no .trace (constructed outside resolve()) must persist as
+    null on the record, not as a half-empty struct."""
+    plan = _plan()
+    assert plan.trace is None
+    runner.execute(plan, _manifest(), workdir=tmp_path)
+
+    r = RecordManager(tmp_path).list()[0]
+    assert r.resolver_trace is None
+
+
 def test_multiple_runs_produce_distinct_records(tmp_path, fake_subprocess, fake_provision):
     runner.execute(_plan(), _manifest(), workdir=tmp_path)
     runner.execute(_plan(), _manifest(), workdir=tmp_path)

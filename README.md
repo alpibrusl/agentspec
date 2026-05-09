@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/License-EUPL--1.2-blue.svg)](https://eupl.eu/)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org)
-[![Tests](https://img.shields.io/badge/tests-476%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-488%20passing-brightgreen.svg)](tests/)
 
 Existing agent formats (gitagent, Agent Format, OSSA, Open Agent Spec) are static config files. AgentSpec is two things neither of them does:
 
@@ -167,7 +167,7 @@ Given a `.agent` file, the resolver:
 4. Maps abstract skills to concrete tools
 5. Builds the system prompt from traits / SOUL.md / RULES.md
 6. Falls back to capability tier if no preferred model resolves
-7. Explains every decision with `--verbose`, and persists the same trail into the per-run `ExecutionRecord` (`resolver_decisions`) so a future audit can reconstruct *why* this runtime / model was picked — not just what ran
+7. Explains every decision with `--verbose`, and persists both a free-text trail (`resolver_decisions`) and a structured trace (`resolver_trace`: `runtimes_detected`, `model_selection.candidates` with skip reasons, `skills`, `mcp_tools`, optional `vertex` routing) on the per-run `ExecutionRecord` — so a future audit or agent can answer *why* this runtime / model / tool was picked, machine-readable, without parsing English
 
 ```bash
 $ agentspec resolve researcher.agent
@@ -345,7 +345,7 @@ src/agentspec/
 ## Testing
 
 ```bash
-pytest tests/         # 476 tests — parser, merger, resolver, provisioner,
+pytest tests/         # 488 tests — parser, merger, resolver, provisioner,
                       # profile, signing (Ed25519 round-trip/tamper/wrong-key),
                       # registry auth, runner, multi-CLI parity
 ```

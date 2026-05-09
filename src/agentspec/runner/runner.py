@@ -23,6 +23,7 @@ from agentspec.parser.manifest import AgentManifest
 from agentspec.records.manager import RecordManager, new_run_id
 from agentspec.records.models import ExecutionRecord
 from agentspec.resolver.resolver import ResolvedPlan
+from agentspec.resolver.trace import ResolverTrace
 from agentspec.resolver.vertex import detect_vertex_ai, vertex_env_for_runtime
 from agentspec.runner.isolation import (
     IsolationBackend,
@@ -159,6 +160,7 @@ def execute(
             exit_code=result.returncode,
             warnings=run_warnings,
             decisions=list(plan.decisions or []),
+            trace=plan.trace,
         )
 
     return result.returncode
@@ -273,6 +275,7 @@ def _write_record(
     exit_code: int,
     warnings: list[str],
     decisions: list[str] | None = None,
+    trace: ResolverTrace | None = None,
 ) -> None:
     """Build an ExecutionRecord from the run and persist it.
 
@@ -281,11 +284,10 @@ def _write_record(
     caller-side knowledge the runner does not currently have; they can
     be added when the CLI grows ``--timeout``.
 
-    ``decisions`` is the resolver's reasoning trail (which runtimes were
-    detected, why this one was picked, how skills mapped to tools).
-    Persisting it into the record turns "what ran" into "why this ran"
-    — a future agent reading the record can reconstruct the choice
-    without re-running the resolver against a now-different host.
+    ``decisions`` is the free-text reasoning trail; ``trace`` is the
+    structured machine-readable companion (a ``ResolverTrace`` or
+    ``None`` for hand-built plans). Both are persisted on the record
+    so a future agent can reconstruct *why* this ran, not just what.
     """
     outcome = "success" if exit_code == 0 else "failure"
     record = ExecutionRecord(
@@ -300,6 +302,7 @@ def _write_record(
         outcome=outcome,
         warnings=list(warnings),
         resolver_decisions=list(decisions or []),
+        resolver_trace=trace,
     )
     RecordManager(workdir).write(record)
 

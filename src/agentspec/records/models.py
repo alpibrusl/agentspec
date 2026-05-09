@@ -11,6 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agentspec.resolver.trace import ResolverTrace
+
 Outcome = Literal["success", "failure", "aborted", "timeout"]
 
 
@@ -59,6 +61,16 @@ class ExecutionRecord(BaseModel):
             "Lets a future agent reconstruct *why* a run happened, not "
             "just *what* ran. Empty when the runner was invoked with a "
             "plan built outside the resolver path."
+        ),
+    )
+    resolver_trace: ResolverTrace | None = Field(
+        default=None,
+        description=(
+            "Machine-readable companion to ``resolver_decisions``: which "
+            "runtimes were detected, which model candidates were tried "
+            "(with skip reasons), how skills resolved, and whether "
+            "Vertex routing fired. ``None`` when the runner was invoked "
+            "with a hand-built plan that bypassed the resolver."
         ),
     )
 

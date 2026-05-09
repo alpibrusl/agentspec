@@ -21,6 +21,15 @@ from dataclasses import dataclass, field
 
 from agentspec.parser.manifest import AgentManifest
 from agentspec.resolver.merger import resolve_inheritance
+from agentspec.resolver.trace import (
+    McpToolResolution,
+    ModelCandidate,
+    ModelSelection,
+    ResolverTrace,
+    RuntimeDetection,
+    SkillResolution,
+    VertexRouting,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +46,10 @@ class ResolvedPlan:
     system_prompt: str = ""
     warnings: list[str] = field(default_factory=list)
     decisions: list[str] = field(default_factory=list)
+    # Structured companion to ``decisions``. Populated by ``resolve()``.
+    # When a plan is hand-built (some tests, future hand-built plans),
+    # this stays None and the runner persists ``null`` on the record.
+    trace: ResolverTrace | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -48,6 +61,7 @@ class ResolvedPlan:
             "system_prompt_length": len(self.system_prompt),
             "warnings": self.warnings,
             "decisions": self.decisions,
+            "trace": self.trace.model_dump(exclude_none=True) if self.trace else None,
         }
 
 
@@ -61,19 +75,28 @@ def resolve(manifest: AgentManifest, *, verbose: bool = False) -> ResolvedPlan:
     4. Resolve abstract skills → concrete tools
     5. Resolve concrete MCP tools
     6. Build system prompt from soul/rules/traits
+
+    Both a free-text decision log (``ResolvedPlan.decisions``) and a
+    structured trace (``ResolvedPlan.trace``) are produced from the
+    same code paths; the structured trace is what gets persisted on
+    the execution record for machine-readable audit.
     """
     manifest = resolve_inheritance(manifest)
 
     warnings: list[str] = []
     decisions: list[str] = []
+    trace = ResolverTrace()
 
     # Step 1: detect available runtimes
     available = _detect_runtimes()
     decisions.append(f"Detected runtimes: {[k for k, v in available.items() if v]}")
+    trace.runtimes_detected = [
+        RuntimeDetection(name=name, available=ok) for name, ok in available.items()
+    ]
 
     # Step 2: match model to runtime + auth
     resolved_model, runtime, auth_source = _resolve_model(
-        manifest.model, manifest.auth, available, decisions
+        manifest.model, manifest.auth, available, decisions, trace=trace
     )
     if not resolved_model:
         raise RuntimeError(
@@ -84,10 +107,10 @@ def resolve(manifest: AgentManifest, *, verbose: bool = False) -> ResolvedPlan:
         )
 
     # Step 3: resolve abstract skills → concrete tools
-    skill_tools, skill_missing = _resolve_skills(manifest.skills, decisions)
+    skill_tools, skill_missing = _resolve_skills(manifest.skills, decisions, trace=trace)
 
     # Step 4: resolve concrete MCP tools
-    mcp_tools, mcp_missing = _resolve_mcp(manifest.tools.mcp, decisions)
+    mcp_tools, mcp_missing = _resolve_mcp(manifest.tools.mcp, decisions, trace=trace)
 
     # Step 5: native tools
     native_tools = manifest.tools.native
@@ -116,6 +139,7 @@ def resolve(manifest: AgentManifest, *, verbose: bool = False) -> ResolvedPlan:
         system_prompt=system_prompt,
         warnings=warnings,
         decisions=decisions,
+        trace=trace,
     )
 
 
@@ -324,28 +348,82 @@ def _resolve_model(
     auth_spec: object,
     available: dict[str, bool],
     decisions: list[str],
+    *,
+    trace: ResolverTrace | None = None,
+    _fallback_capability: str | None = None,
 ) -> tuple[str | None, str, str]:
     """Try each preferred model in order, checking runtime + auth.
 
     When Vertex AI is configured (GOOGLE_CLOUD_PROJECT + ADC), claude-code
     and gemini-cli route through it instead of direct provider APIs.
+
+    ``trace`` is optional so existing direct callers (tests) keep working;
+    when supplied, the per-candidate verdicts and the final selection are
+    recorded on ``trace.model_selection``. ``_fallback_capability`` is
+    set internally on the recursive call so the fallback tier is captured
+    in the structured trace.
     """
     from agentspec.resolver.vertex import can_route_through_vertex, detect_vertex_ai
 
     vertex = detect_vertex_ai()
     if vertex:
         decisions.append(f"  Vertex AI detected: {vertex}")
+        if trace is not None and trace.vertex is None:
+            trace.vertex = VertexRouting(
+                project=vertex.project, location=vertex.location, used=False
+            )
+
+    if trace is not None and _fallback_capability is not None:
+        trace.model_selection.fallback_capability_used = _fallback_capability
+
+    def _record_candidate(
+        preferred: str,
+        provider: str,
+        runtime_name: str | None,
+        outcome: str,
+        skip_reason: str | None = None,
+        auth_source: str | None = None,
+    ) -> None:
+        if trace is None:
+            return
+        trace.model_selection.candidates.append(
+            ModelCandidate(
+                model=preferred,
+                provider=provider,
+                runtime=runtime_name,
+                outcome=outcome,  # type: ignore[arg-type]
+                skip_reason=skip_reason,
+                auth_source=auth_source,
+            )
+        )
+
+    def _record_selected(
+        preferred: str, runtime_name: str, auth_source: str, *, vertex_used: bool
+    ) -> None:
+        if trace is None:
+            return
+        trace.model_selection.selected_model = preferred
+        trace.model_selection.selected_runtime = runtime_name
+        trace.model_selection.selected_auth_source = auth_source
+        if vertex_used and trace.vertex is not None:
+            trace.vertex.used = True
 
     for preferred in model_spec.preferred:  # type: ignore[union-attr]
         provider = preferred.split("/")[0]
         if provider not in PROVIDER_MAP:
-            decisions.append(f"  skip {preferred}: unknown provider '{provider}'")
+            reason = f"unknown provider '{provider}'"
+            decisions.append(f"  skip {preferred}: {reason}")
+            _record_candidate(preferred, provider, None, "skipped", skip_reason=reason)
             continue
 
         runtime_name, env_keys = PROVIDER_MAP[provider]
 
         if not available.get(runtime_name):
-            decisions.append(f"  skip {preferred}: {runtime_name} not in PATH")
+            reason = f"{runtime_name} not in PATH"
+            decisions.append(f"  skip {preferred}: {reason}")
+            _record_candidate(
+                preferred, provider, runtime_name, "skipped", skip_reason=reason
+            )
             continue
 
         # Vertex AI path: route through GCP if available and provider supports it
@@ -354,6 +432,10 @@ def _resolve_model(
             decisions.append(
                 f"  selected {preferred} via {runtime_name} (Vertex AI: {vertex.location})"
             )
+            _record_candidate(
+                preferred, provider, runtime_name, "selected", auth_source=auth_source
+            )
+            _record_selected(preferred, runtime_name, auth_source, vertex_used=True)
             return preferred, runtime_name, auth_source
 
         # Direct provider API path: try each accepted env key in order,
@@ -377,17 +459,32 @@ def _resolve_model(
                         f"  selected {preferred} via {runtime_name} ({auth_source}; "
                         f"none of {tried} set — assuming CLI is logged in)"
                     )
+                    _record_candidate(
+                        preferred,
+                        provider,
+                        runtime_name,
+                        "selected",
+                        auth_source=auth_source,
+                    )
+                    _record_selected(
+                        preferred, runtime_name, auth_source, vertex_used=False
+                    )
                     return preferred, runtime_name, auth_source
                 tried = "/".join(env_keys)
-                decisions.append(
-                    f"  skip {preferred}: none of {tried} set "
-                    "(and Vertex AI not configured)"
+                reason = f"none of {tried} set (and Vertex AI not configured)"
+                decisions.append(f"  skip {preferred}: {reason}")
+                _record_candidate(
+                    preferred, provider, runtime_name, "skipped", skip_reason=reason
                 )
                 continue
             auth_source = f"env.{satisfied_key}"
         else:
             auth_source = "local socket"
         decisions.append(f"  selected {preferred} via {runtime_name} ({auth_source})")
+        _record_candidate(
+            preferred, provider, runtime_name, "selected", auth_source=auth_source
+        )
+        _record_selected(preferred, runtime_name, auth_source, vertex_used=False)
         return preferred, runtime_name, auth_source
 
     # Try fallback capability
@@ -400,7 +497,14 @@ def _resolve_model(
                 preferred = defaults
                 fallback = None
 
-            return _resolve_model(FallbackSpec(), auth_spec, available, decisions)
+            return _resolve_model(
+                FallbackSpec(),
+                auth_spec,
+                available,
+                decisions,
+                trace=trace,
+                _fallback_capability=fallback,
+            )
 
     return None, "", ""
 
@@ -459,7 +563,10 @@ def _skill_name(entry: str | dict) -> str:
 
 
 def _resolve_skills(
-    skills: list[str | dict], decisions: list[str]
+    skills: list[str | dict],
+    decisions: list[str],
+    *,
+    trace: ResolverTrace | None = None,
 ) -> tuple[list[str], list[str]]:
     resolved: list[str] = []
     missing: list[str] = []
@@ -469,9 +576,17 @@ def _resolve_skills(
         if candidates is None:
             decisions.append(f"  skill {skill}: unknown, passing through")
             resolved.append(skill)
+            if trace is not None:
+                trace.skills.append(
+                    SkillResolution(
+                        skill=skill, outcome="passthrough", resolved_to=skill
+                    )
+                )
             continue
         if not candidates:
             decisions.append(f"  skill {skill}: built-in (no tool needed)")
+            if trace is not None:
+                trace.skills.append(SkillResolution(skill=skill, outcome="builtin"))
             continue
         found = next(
             (c for c in candidates if shutil.which(c.replace("-mcp", "").replace("_", ""))),
@@ -480,9 +595,24 @@ def _resolve_skills(
         if found:
             resolved.append(found)
             decisions.append(f"  skill {skill}: resolved to {found}")
+            if trace is not None:
+                trace.skills.append(
+                    SkillResolution(
+                        skill=skill,
+                        outcome="resolved",
+                        resolved_to=found,
+                        candidates=list(candidates),
+                    )
+                )
         else:
             missing.append(skill)
             decisions.append(f"  skill {skill}: no tool found from {candidates}")
+            if trace is not None:
+                trace.skills.append(
+                    SkillResolution(
+                        skill=skill, outcome="missing", candidates=list(candidates)
+                    )
+                )
     return resolved, missing
 
 
@@ -490,7 +620,10 @@ def _resolve_skills(
 
 
 def _resolve_mcp(
-    mcp_tools: list[str | dict[str, object]], decisions: list[str]
+    mcp_tools: list[str | dict[str, object]],
+    decisions: list[str],
+    *,
+    trace: ResolverTrace | None = None,
 ) -> tuple[list[str], list[str]]:
     resolved: list[str] = []
     missing: list[str] = []
@@ -499,6 +632,8 @@ def _resolve_mcp(
         # MCP tools are registered at runtime — we pass them through
         resolved.append(f"mcp:{name}")
         decisions.append(f"  mcp tool {name}: registered (runtime will verify)")
+        if trace is not None:
+            trace.mcp_tools.append(McpToolResolution(name=name))
     return resolved, missing
 
 
