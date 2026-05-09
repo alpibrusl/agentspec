@@ -158,6 +158,7 @@ def execute(
             duration_s=time.monotonic() - start_monotonic,
             exit_code=result.returncode,
             warnings=run_warnings,
+            decisions=list(plan.decisions or []),
         )
 
     return result.returncode
@@ -271,6 +272,7 @@ def _write_record(
     duration_s: float,
     exit_code: int,
     warnings: list[str],
+    decisions: list[str] | None = None,
 ) -> None:
     """Build an ExecutionRecord from the run and persist it.
 
@@ -278,6 +280,12 @@ def _write_record(
     ``failure``. Signal-based terminations (aborted/timeout) would need
     caller-side knowledge the runner does not currently have; they can
     be added when the CLI grows ``--timeout``.
+
+    ``decisions`` is the resolver's reasoning trail (which runtimes were
+    detected, why this one was picked, how skills mapped to tools).
+    Persisting it into the record turns "what ran" into "why this ran"
+    — a future agent reading the record can reconstruct the choice
+    without re-running the resolver against a now-different host.
     """
     outcome = "success" if exit_code == 0 else "failure"
     record = ExecutionRecord(
@@ -291,6 +299,7 @@ def _write_record(
         exit_code=exit_code,
         outcome=outcome,
         warnings=list(warnings),
+        resolver_decisions=list(decisions or []),
     )
     RecordManager(workdir).write(record)
 

@@ -116,6 +116,35 @@ def test_record_warnings_copied_from_plan(tmp_path, fake_subprocess, fake_provis
     assert "using fallback model" in r.warnings
 
 
+def test_record_resolver_decisions_carried_from_plan(
+    tmp_path, fake_subprocess, fake_provision
+):
+    """The resolver's reasoning trail must land on the record so a future
+    agent reading the record knows *why* this runtime / model was picked,
+    not just *what* ran."""
+    plan = _plan()
+    plan.decisions = [
+        "Detected runtimes: ['claude-code', 'gemini-cli']",
+        "selected claude/claude-sonnet-4-6 via claude-code (env.ANTHROPIC_API_KEY)",
+        "skill web-search: resolved to brave-mcp",
+    ]
+    runner.execute(plan, _manifest(), workdir=tmp_path)
+
+    r = RecordManager(tmp_path).list()[0]
+    assert r.resolver_decisions == plan.decisions
+
+
+def test_record_resolver_decisions_default_empty_when_plan_has_none(
+    tmp_path, fake_subprocess, fake_provision
+):
+    plan = _plan()
+    assert plan.decisions == []
+    runner.execute(plan, _manifest(), workdir=tmp_path)
+
+    r = RecordManager(tmp_path).list()[0]
+    assert r.resolver_decisions == []
+
+
 def test_multiple_runs_produce_distinct_records(tmp_path, fake_subprocess, fake_provision):
     runner.execute(_plan(), _manifest(), workdir=tmp_path)
     runner.execute(_plan(), _manifest(), workdir=tmp_path)

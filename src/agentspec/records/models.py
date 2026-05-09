@@ -51,6 +51,16 @@ class ExecutionRecord(BaseModel):
         description="Coarse-grained result — 'success' iff exit_code == 0 by default."
     )
     warnings: list[str] = Field(default_factory=list)
+    resolver_decisions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Free-text trail of why the resolver picked this runtime / "
+            "model / tools — sourced from ResolvedPlan.decisions. "
+            "Lets a future agent reconstruct *why* a run happened, not "
+            "just *what* ran. Empty when the runner was invoked with a "
+            "plan built outside the resolver path."
+        ),
+    )
 
     # Opt-in observability. None when not captured; never prompt/output content.
     token_usage: dict[str, int] | None = Field(
