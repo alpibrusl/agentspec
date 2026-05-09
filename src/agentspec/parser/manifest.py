@@ -6,9 +6,12 @@ unknown fields are silently dropped, never errored.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+_log = logging.getLogger(__name__)
 
 
 # ── Model ──────────────────────────────────────────────────────────────────────
@@ -131,6 +134,26 @@ class TrustSpec(BaseModel, extra="ignore"):
     network: Literal["none", "allowed", "scoped"] = "none"
     exec: Literal["none", "sandboxed", "full"] = "none"
     scope: list[str] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def _warn_unknown_trust_keys(cls, data: Any) -> Any:
+        # Trust is the one block where a typo silently degrading to the
+        # most-restrictive default is dangerous: the manifest looks like
+        # it grants something, the resolver enforces something stricter,
+        # and the run fails in a confusing place. Surface unknown keys
+        # at parse time so authors notice. Other models keep the silent
+        # forward-compat behaviour.
+        if isinstance(data, dict):
+            known = set(cls.model_fields.keys())
+            unknown = sorted(k for k in data.keys() if k not in known)
+            if unknown:
+                _log.warning(
+                    "TrustSpec: ignoring unknown key(s) %s — typo? "
+                    "Missing fields fall back to the most-restrictive default.",
+                    unknown,
+                )
+        return data
 
     def is_at_least_as_restrictive_as(self, other: TrustSpec) -> bool:
         """Enforce trust-restrict invariant: self (child) must be <= other (parent)."""

@@ -234,9 +234,21 @@ def test_policy_network_allowed_enables_network(tmp_path):
 
 def test_policy_network_scoped_enables_with_warning(tmp_path):
     # bwrap v0.7 can't filter egress by host; scoped degrades to 'allowed'
-    # (noted in proposal 002, open question 5).
+    # (noted in proposal 002, open question 5). The downgrade is recorded
+    # on the policy so the runner can append it to the per-run record.
     p = policy_from_trust(TrustSpec(network="scoped"), workdir=tmp_path)
     assert p.network is True
+    assert any("scoped" in w and "allowed" in w for w in p.warnings), p.warnings
+
+
+def test_policy_network_allowed_does_not_warn(tmp_path):
+    p = policy_from_trust(TrustSpec(network="allowed"), workdir=tmp_path)
+    assert p.warnings == []
+
+
+def test_policy_network_none_does_not_warn(tmp_path):
+    p = policy_from_trust(TrustSpec(network="none"), workdir=tmp_path)
+    assert p.warnings == []
 
 
 def test_policy_env_always_includes_path(tmp_path):

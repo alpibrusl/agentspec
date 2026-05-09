@@ -105,21 +105,48 @@ def sign_memory(memory: Memory, private_key: str) -> SignedEnvelope:
     )
 
 
-def verify_memory(memory: Memory, envelope: SignedEnvelope) -> bool:
-    """Verify a signed memory against the envelope's declared public key.
+def verify_memory(
+    memory: Memory, envelope: SignedEnvelope, public_key_hex: str
+) -> bool:
+    """Verify a signed memory against a *trusted* public key.
 
-    Returns ``False`` for any of: wrong algorithm, malformed hex, bad
-    signature, mismatched payload.
+    ``public_key_hex`` is the supervisor pubkey the caller already
+    trusts (out-of-band: pinned in config, fetched from a trusted
+    keyserver, etc.). Returns ``False`` if any of:
+
+    - the envelope's declared signer doesn't match ``public_key_hex``
+      (caller doesn't trust this signer)
+    - wrong algorithm
+    - malformed hex
+    - bad signature / mismatched payload
+
+    This is a deliberate breaking change from the pre-0.5.1 signature.
+    The old form ``verify_memory(memory, envelope)`` accepted the
+    envelope's own ``signer`` field as the verifying key, which made
+    it trivial to forge a self-asserted "valid" envelope: anyone could
+    sign a payload with their own keypair and the call would return
+    ``True``. ``verify_portfolio_entry`` and ``verify_skill_proof``
+    already required an explicit pubkey arg; this function now matches.
     """
     if envelope.algorithm != ALGORITHM:
         return False
 
+    if not _hex_eq(envelope.signer, public_key_hex):
+        return False
+
     try:
-        vk = VerifyKey(bytes.fromhex(envelope.signer))
+        vk = VerifyKey(bytes.fromhex(public_key_hex))
         vk.verify(_memory_payload(memory), bytes.fromhex(envelope.signature))
     except (BadSignatureError, ValueError):
         return False
     return True
+
+
+def _hex_eq(a: str, b: str) -> bool:
+    """Case-insensitive constant-time equality for hex strings."""
+    import secrets
+
+    return secrets.compare_digest(a.lower().encode(), b.lower().encode())
 
 
 def sign_portfolio_entry(entry: PortfolioEntry, private_key: str) -> str:

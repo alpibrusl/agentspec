@@ -130,7 +130,7 @@ All signed by the supervisor in one batch.
 
 ## Signing
 
-Default: Ed25519 via PyNaCl. Falls back to HMAC-SHA256 if PyNaCl unavailable.
+Ed25519 via PyNaCl. PyNaCl has been a hard dependency since 0.4.1 — there is no fallback.
 
 ```python
 from agentspec.profile import generate_keypair, sign_memory, verify_memory
@@ -140,8 +140,9 @@ private_key, public_key = generate_keypair()
 # Supervisor signs
 envelope = sign_memory(memory, private_key)
 
-# Anyone verifies (with public key)
-is_valid = verify_memory(memory, envelope)
+# Anyone verifies — caller must supply the pubkey they trust out-of-band.
+# Passing envelope.signer here would defeat the check.
+is_valid = verify_memory(memory, envelope, public_key)
 ```
 
 Signed payload (canonical JSON, sorted keys):

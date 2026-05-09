@@ -176,7 +176,7 @@ from agentspec.profile.signing import (
 
 private_key, public_key = generate_keypair()
 envelope = sign_memory(memory, private_key)
-is_valid = verify_memory(memory, envelope)
+is_valid = verify_memory(memory, envelope, public_key)
 ```
 
-Uses Ed25519 via PyNaCl when available, falls back to HMAC-SHA256.
+Uses Ed25519 via PyNaCl. The HMAC fallback was removed in 0.4.1; PyNaCl is now a hard dependency.
