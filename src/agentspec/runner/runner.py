@@ -119,6 +119,9 @@ def execute(
             workdir=workdir,
             extra_env_allowlist=_env_allowlist_for_plan(plan),
         )
+        for w in policy.warnings:
+            log.warning(w)
+            run_warnings.append(w)
         cmd, policy_tmpfile = _wrap_with_isolation(
             cmd, env, policy, bwrap_path=bwrap_path, workdir=workdir
         )

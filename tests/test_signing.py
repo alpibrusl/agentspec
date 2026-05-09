@@ -81,48 +81,78 @@ def test_public_key_for_is_deterministic():
 
 
 def test_memory_round_trip():
-    priv, _ = generate_keypair()
+    priv, pub = generate_keypair()
     m = _memory()
     env = sign_memory(m, priv)
     assert env.algorithm == ALGORITHM
-    assert verify_memory(m, env) is True
+    assert verify_memory(m, env, pub) is True
 
 
 def test_memory_rejects_tampered_content():
-    priv, _ = generate_keypair()
+    priv, pub = generate_keypair()
     m = _memory(content="original")
     env = sign_memory(m, priv)
 
     tampered = _memory(content="tampered")
-    assert verify_memory(tampered, env) is False
+    assert verify_memory(tampered, env, pub) is False
 
 
 def test_memory_rejects_tampered_id():
-    priv, _ = generate_keypair()
+    priv, pub = generate_keypair()
     m = _memory(id_="m1")
     env = sign_memory(m, priv)
 
     other = _memory(id_="m2")
-    assert verify_memory(other, env) is False
+    assert verify_memory(other, env, pub) is False
 
 
-def test_memory_rejects_wrong_signer_pubkey():
-    priv_a, _ = generate_keypair()
+def test_memory_rejects_envelope_signed_by_other_key():
+    """Caller trusts pub_a; an envelope signed by priv_b must not verify
+    even though it's a valid signature against its own declared signer."""
+    priv_a, pub_a = generate_keypair()
+    priv_b, _ = generate_keypair()
+    m = _memory()
+
+    env_b = sign_memory(m, priv_b)
+    assert verify_memory(m, env_b, pub_a) is False
+
+
+def test_memory_rejects_self_asserted_pubkey():
+    """The pre-0.5.1 footgun: forged envelope claims its own signer.
+    With the new API the caller's trusted pubkey is what matters, so a
+    self-asserted forgery is rejected even if the signature is internally
+    consistent."""
+    priv_a, pub_a = generate_keypair()
+    priv_b, pub_b = generate_keypair()
+    m = _memory()
+
+    # Attacker signs with priv_b and self-asserts pub_b as the signer.
+    forgery = sign_memory(m, priv_b)
+    assert forgery.signer == pub_b
+
+    # Caller pinned pub_a as trusted — must reject.
+    assert verify_memory(m, forgery, pub_a) is False
+
+
+def test_memory_rejects_signer_mismatch():
+    """An envelope whose signer field doesn't match the trusted pubkey
+    is rejected without even attempting signature verification."""
+    priv_a, pub_a = generate_keypair()
     _, pub_b = generate_keypair()
     m = _memory()
 
     env = sign_memory(m, priv_a)
-    forged = SignedEnvelope(
+    tampered_signer = SignedEnvelope(
         memory_id=env.memory_id,
-        signer=pub_b,  # someone else's key
+        signer=pub_b,
         algorithm=env.algorithm,
         signature=env.signature,
     )
-    assert verify_memory(m, forged) is False
+    assert verify_memory(m, tampered_signer, pub_a) is False
 
 
 def test_memory_rejects_malformed_signature():
-    priv, _ = generate_keypair()
+    priv, pub = generate_keypair()
     m = _memory()
     env = sign_memory(m, priv)
 
@@ -133,13 +163,13 @@ def test_memory_rejects_malformed_signature():
             algorithm=env.algorithm,
             signature=bad_sig,
         )
-        assert verify_memory(m, bad_env) is False, f"should reject {bad_sig!r}"
+        assert verify_memory(m, bad_env, pub) is False, f"should reject {bad_sig!r}"
 
 
 def test_memory_rejects_unknown_algorithm():
     """The previous HMAC branch rubber-stamped any 64-char hex signature.
     Verify it no longer exists — envelopes with algorithm != 'ed25519' fail."""
-    priv, _ = generate_keypair()
+    priv, pub = generate_keypair()
     m = _memory()
     env = sign_memory(m, priv)
     hmac_shaped = SignedEnvelope(
@@ -148,7 +178,7 @@ def test_memory_rejects_unknown_algorithm():
         algorithm="hmac-sha256",
         signature="a" * 64,
     )
-    assert verify_memory(m, hmac_shaped) is False
+    assert verify_memory(m, hmac_shaped, pub) is False
 
 
 # ── portfolio entry + skill proof round-trip + wrong-key ──────────────────────

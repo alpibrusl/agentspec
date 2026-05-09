@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/License-EUPL--1.2-blue.svg)](https://eupl.eu/)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org)
-[![Tests](https://img.shields.io/badge/tests-431%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-474%20passing-brightgreen.svg)](tests/)
 
 Existing agent formats (gitagent, Agent Format, OSSA, Open Agent Spec) are static config files. AgentSpec is two things neither of them does:
 
@@ -14,19 +14,19 @@ Existing agent formats (gitagent, Agent Format, OSSA, Open Agent Spec) are stati
 ```yaml
 # parent.agent
 trust:
-  filesystem: readwrite
-  network: allow
-  exec: allow
+  filesystem: full
+  network: allowed
+  exec: full
 
 # child.agent
-inherits: parent
+base: ./parent.agent
 trust:
-  filesystem: readonly     # narrowed — OK
-  network: deny            # narrowed — OK
-  exec: allow              # inherited
+  filesystem: read-only    # narrowed — OK
+  network: none            # narrowed — OK
+  exec: full               # inherited
 ```
 
-After merge, the child has `{readonly, deny, allow}`. If it had tried to widen any dimension (e.g. `filesystem: readwrite` in the child), the merger rejects the manifest at load time.
+After merge, the child has `{read-only, none, full}`. If it had tried to widen any dimension (e.g. `filesystem: full` in a child whose parent declared `read-only`), the merger rejects the manifest at load time.
 
 ```
 your .agent file
@@ -345,7 +345,7 @@ src/agentspec/
 ## Testing
 
 ```bash
-pytest tests/         # 271 tests — parser, merger, resolver, provisioner,
+pytest tests/         # 474 tests — parser, merger, resolver, provisioner,
                       # profile, signing (Ed25519 round-trip/tamper/wrong-key),
                       # registry auth, runner, multi-CLI parity
 ```

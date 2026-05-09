@@ -60,12 +60,19 @@ class IsolationPolicy:
     Rendered into a bwrap argv by ``build_bwrap_argv``. Kept decoupled
     from the renderer so a second backend (e.g. native namespaces +
     Landlock + seccomp) can consume the same policy unchanged.
+
+    ``warnings`` collects any approximations the policy made relative
+    to the manifest's declared trust (e.g. ``network: scoped`` →
+    ``allowed`` because bwrap can't filter egress). The runner appends
+    these to the per-run execution record so the downgrade is visible
+    in audit even when the resolver-level warning was missed.
     """
 
     ro_binds: list[tuple[Path, Path]]
     rw_binds: list[tuple[Path, Path]]
     network: bool
     env_allowlist: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 # Env vars that runtimes need to find binaries + locale + CA certs.
@@ -259,6 +266,20 @@ def policy_from_trust(
 
     network = trust.network != "none"
 
+    warnings: list[str] = []
+    if trust.network == "scoped":
+        # bwrap v1 can't filter egress per-host/per-URL, so ``scoped``
+        # collapses to ``allowed`` at the sandbox level. The resolver
+        # also emits a warning one level up, but recording it here too
+        # guarantees it lands in the per-run execution record even when
+        # the policy is built outside the resolver path (e.g. tests,
+        # noether adapter). Real egress filtering is v0.8+ territory.
+        warnings.append(
+            "trust.network=scoped degraded to 'allowed' in the sandbox "
+            "(bwrap can't filter egress); declare network=allowed to make "
+            "this explicit, or wait for the native backend"
+        )
+
     env = list(_BASE_ENV_ALLOWLIST)
     if extra_env_allowlist:
         for name in extra_env_allowlist:
@@ -270,6 +291,7 @@ def policy_from_trust(
         rw_binds=rw_binds,
         network=network,
         env_allowlist=env,
+        warnings=warnings,
     )
 
 

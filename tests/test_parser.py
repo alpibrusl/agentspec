@@ -89,6 +89,22 @@ class TestTrust:
         t = TrustSpec(filesystem="scoped", network="allowed", exec="sandboxed")
         assert t.is_at_least_as_restrictive_as(t)
 
+    def test_unknown_trust_keys_warn(self, caplog):
+        """Typos in trust keys should warn — silent ignore is dangerous here."""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="agentspec.parser.manifest"):
+            t = TrustSpec(filesystem="scoped", netwrok="allowed")  # type: ignore[call-arg]
+        assert t.network == "none"  # typo silently dropped (most-restrictive default)
+        assert any("netwrok" in r.message for r in caplog.records)
+
+    def test_known_trust_keys_do_not_warn(self, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="agentspec.parser.manifest"):
+            TrustSpec(filesystem="scoped", network="allowed", exec="sandboxed")
+        assert not caplog.records
+
 
 # ── Loader ────────────────────────────────────────────────────────────────────
 
