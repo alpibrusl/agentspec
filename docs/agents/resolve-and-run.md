@@ -47,21 +47,56 @@ Launching claude-code...
 <runtime output stream>
 ```
 
-Execution record (`.agentspec/records/<run-id>.json`):
+Execution record (`.agentspec/records/<run-id>.json`). Authoritative schema: `src/agentspec/records/models.py` (search `record/v1`). Abbreviated example:
 
 ```json
 {
   "schema": "agentspec.record/v1",
-  "run_id": "01HT…",
-  "agent": { "name": "my-agent", "version": "1.0.0", "hash": "ag1:…" },
-  "runtime": "claude-code",
+  "run_id": "01HT3KVRF4WQYJ5N1ZN7WQM4D9",
+  "manifest_hash": "ag1:abc123def456",
+  "lock_hash": null,
   "started_at": "2026-04-21T10:30:45Z",
-  "duration_ms": 312,
+  "ended_at": "2026-04-21T10:30:45Z",
+  "duration_s": 0.312,
+  "runtime": "claude-code",
+  "runtime_version": null,
+  "model": "claude/claude-sonnet-4-6",
   "exit_code": 0,
   "outcome": "success",
-  "host": { "os": "linux", "arch": "x86_64", "user": "…" }
+  "warnings": [],
+  "resolver_decisions": [
+    "Detected runtimes: ['claude-code', 'gemini-cli']",
+    "  selected claude/claude-sonnet-4-6 via claude-code (env.ANTHROPIC_API_KEY)",
+    "  skill web-search: resolved to brave-mcp"
+  ],
+  "resolver_trace": {
+    "runtimes_detected": [
+      {"name": "claude-code", "available": true},
+      {"name": "gemini-cli",  "available": true}
+    ],
+    "vertex": null,
+    "model_selection": {
+      "candidates": [
+        {"model": "claude/claude-sonnet-4-6", "provider": "claude",
+         "runtime": "claude-code", "outcome": "selected",
+         "auth_source": "env.ANTHROPIC_API_KEY"}
+      ],
+      "selected_model": "claude/claude-sonnet-4-6",
+      "selected_runtime": "claude-code",
+      "selected_auth_source": "env.ANTHROPIC_API_KEY",
+      "fallback_capability_used": null
+    },
+    "skills": [
+      {"skill": "web-search", "outcome": "resolved",
+       "resolved_to": "brave-mcp",
+       "candidates": ["brave-mcp", "serper-mcp", "tavily-mcp"]}
+    ],
+    "mcp_tools": []
+  }
 }
 ```
+
+`outcome` is one of `success | failure | aborted | timeout`. `resolver_decisions` is the free-text trail; `resolver_trace` is the machine-readable companion (typed sub-objects, every model candidate's verdict including skip reasons). Both are populated from the same code paths so they cannot drift. `resolver_trace` is `null` when the runner is invoked with a hand-built plan that bypassed `resolve()`.
 
 Records never contain prompt content, model output, or secrets. They are the audit trail, not the transcript.
 

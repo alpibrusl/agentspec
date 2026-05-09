@@ -99,25 +99,46 @@ Check the record:
 
 ```bash
 $ agentspec records list
-2026-04-21T10:30:45Z  demo@0.1.0  exit=0  312ms  ag1:…
+  01HT3KVRF4WQYJ5N1ZN7WQM4D9  2026-04-21T10:30:45Z  test-echo     exit=0  [ok]
 ```
 
 ```bash
-$ agentspec records show <run-id>
+$ agentspec records show 01HT3KVRF4WQYJ5N1ZN7WQM4D9
 {
   "schema": "agentspec.record/v1",
-  "run_id": "01HT…",
-  "agent": { "name": "demo", "version": "0.1.0", "hash": "ag1:…" },
-  "runtime": "test-echo",
+  "run_id": "01HT3KVRF4WQYJ5N1ZN7WQM4D9",
+  "manifest_hash": "ag1:abc123def456",
   "started_at": "2026-04-21T10:30:45Z",
-  "duration_ms": 312,
+  "ended_at": "2026-04-21T10:30:45Z",
+  "duration_s": 0.312,
+  "runtime": "test-echo",
+  "model": "test-echo/demo",
   "exit_code": 0,
   "outcome": "success",
-  "host": { "os": "linux", "arch": "x86_64", "user": "…" }
+  "warnings": [],
+  "resolver_decisions": [
+    "Detected runtimes: ['test-echo']",
+    "  selected test-echo/demo via test-echo (local socket)"
+  ],
+  "resolver_trace": {
+    "runtimes_detected": [{"name": "test-echo", "available": true}],
+    "model_selection": {
+      "candidates": [
+        {"model": "test-echo/demo", "provider": "test-echo",
+         "runtime": "test-echo", "outcome": "selected",
+         "auth_source": "local socket"}
+      ],
+      "selected_model": "test-echo/demo",
+      "selected_runtime": "test-echo",
+      "selected_auth_source": "local socket"
+    },
+    "skills": [],
+    "mcp_tools": []
+  }
 }
 ```
 
-No prompt content, no output, no secrets — records are the *audit trail*, not the transcript.
+No prompt content, no output, no secrets — records are the *audit trail*, not the transcript. The two trail fields (`resolver_decisions` free-text and `resolver_trace` structured) record *why* this runtime + model + tools were picked, so a future audit (or future agent) can reconstruct the choice without re-running the resolver against a now-different host.
 
 ---
 

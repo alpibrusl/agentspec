@@ -128,14 +128,19 @@ Even for a failed run, the record exists and tells you *when* it failed:
 $ agentspec records show <run-id>
 {
   "exit_code": 3,
-  "outcome": "runtime_error",
-  "duration_ms": 4210,
-  "started_at": "…",
-  …
+  "outcome": "failure",
+  "duration_s": 4.21,
+  "started_at": "...",
+  "warnings": [],
+  "resolver_decisions": [
+    "Detected runtimes: ['claude-code']",
+    "  selected claude/claude-sonnet-4-6 via claude-code (env.ANTHROPIC_API_KEY)"
+  ],
+  ...
 }
 ```
 
-`duration_ms` especially — a 4-second exit usually means the runtime CLI talked to a provider and got a real error back. A 15ms exit means the sandbox refused before the CLI even loaded.
+`duration_s` especially — a 4-second exit usually means the runtime CLI talked to a provider and got a real error back. A 15ms exit means the sandbox refused before the CLI even loaded. `outcome` is one of `success | failure | aborted | timeout`; signal-based terminations (aborted/timeout) need an explicit caller-side timeout to be distinguished from plain `failure`.
 
 ---
 
@@ -148,6 +153,13 @@ Most common: CI containers lack bwrap. Either install it (`apt install bubblewra
 ### "The resolver picks the wrong model"
 
 `agentspec resolve --verbose` shows the decision chain. Usually: you set `OPENAI_API_KEY` but want Gemini, so the resolver picks codex-cli first. Reorder `preferred:` explicitly, or unset the env var that's tricking the match.
+
+The same chain is also persisted on the run's record under `resolver_decisions` (free text) and `resolver_trace` (structured: `runtimes_detected`, `model_selection.candidates` with skip reasons, `skills`, `mcp_tools`). To diff resolver behaviour between two runs without re-running on the host:
+
+```bash
+diff <(agentspec records show <run-a> --output json | jq .result.resolver_trace) \
+     <(agentspec records show <run-b> --output json | jq .result.resolver_trace)
+```
 
 ### "Records say success but the agent didn't do the thing"
 
